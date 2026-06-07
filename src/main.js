@@ -31,6 +31,7 @@ const azOverride = params.has('az') ? parseFloat(params.get('az')) : null;
 const elOverride = params.has('el') ? parseFloat(params.get('el')) : null;
 const distOverride = params.has('dist') ? parseFloat(params.get('dist')) : null;
 const frozen = still || azOverride !== null;
+const holdClay = params.has('clay');   // debug: pause in the clay-render reveal for a screenshot
 
 // ===== renderer (raytracing-quality output pipeline) =====
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -44,18 +45,62 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const scene = new THREE.Scene();
 RectAreaLightUniformsLib.init();
 
-// ===== IBL — real auto-shop HDRI carries the garage reflections (reel 1) =====
-// Used for reflections/lighting ONLY; the JRV dotted backdrop stays as background
-// so the brand identity survives while the paint reads a true studio clearcoat.
+// reveal state machine: 'load' (GLB downloading) → 'clay' (grey render + % counter
+// ticking) → reveal SNAP → 'done' (full PBR + forest + rain + spray). See snapToReal().
+let phase = 'load';
+let revealed = false;
+let loadedCar = null;
+let clayT = 0;
+const CLAY_DUR = 1.9;
+
+// the reveal SNAP: clay → full PBR + forest env/bg + rain + spray, with a quick flash.
+function snapToReal() {
+  if (revealed) return;
+  revealed = true;
+  phase = 'done';
+  if (loadedCar) loadedCar.traverse((o) => {
+    if (o.isMesh && o.userData.realMat) o.material = o.userData.realMat;
+  });
+  applyForest();                 // forest IBL + blurred backdrop + fog (no-op until HDRI ready)
+  rain.visible = true;
+  sprayOn = true;
+  // a brief white flash sells the "render finished" snap
+  const fl = document.getElementById('flash');
+  if (fl) { fl.classList.add('fire'); setTimeout(() => fl.classList.remove('fire'), 420); }
+  const ld = document.getElementById('loader');
+  if (ld) ld.classList.add('gone');
+}
+
+// ===== IBL — overcast FOREST HDRI (matches the reference: rain-soaked woodland) =====
+// The reference render sits the car on a wet forest road under a diffuse overcast sky,
+// blurred green foliage behind. So the HDRI is loaded for BOTH the environment
+// (green-tinted reflections in the wet clearcoat) AND the background (blurred, darkened
+// so it reads as moody woodland, not a bright photo). It is held in vars and only
+// applied at the reveal SNAP — the clay-render phase before it stays a neutral grey.
 const pmrem = new THREE.PMREMGenerator(renderer);
 pmrem.compileEquirectangularShader();
-new RGBELoader().load('model/autoshop_01_2k.hdr', (hdr) => {
+let forestEnv = null;      // PMREM env map (reflections + ambient)
+let forestEquirect = null; // raw equirect, used blurred as the background
+new RGBELoader().load('model/niederwihl_forest_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  const env = pmrem.fromEquirectangular(hdr).texture;
-  scene.environment = env;
-  scene.environmentIntensity = 1.35;          // brighten HDRI reflections so the clearcoat has crisp light to mirror
-  hdr.dispose();
+  forestEquirect = hdr;                          // keep (NOT disposed) for the blurred backdrop
+  forestEnv = pmrem.fromEquirectangular(hdr).texture;
+  // if the reveal already fired before the HDRI arrived, apply it now
+  if (revealed) applyForest();
 });
+
+// neutral grey "render studio" while the clay model loads in (the WIP look)
+scene.background = new THREE.Color(0x23282b);
+
+function applyForest() {
+  if (!forestEnv) return;
+  scene.environment = forestEnv;
+  scene.environmentIntensity = 1.15;
+  scene.background = forestEquirect;
+  scene.backgroundBlurriness = 0.55;             // soft, defocused foliage — not a sharp photo
+  scene.backgroundIntensity = 0.62;              // darken toward the reference's moody overcast
+  scene.fog = new THREE.FogExp2(0x10160f, 0.018); // green-grey woodland haze for depth
+}
 
 // ===== camera =====
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
@@ -107,8 +152,8 @@ scene.add(skyFill);
 
 // whisper of brand mint on the deep shadow side only — kept very low so the orange
 // paint reads true and the scene stays neutral/overcast, not green.
-const mintKick = new THREE.PointLight(JRV.mint, 0.35, 11, 2);
-mintKick.position.set(-4, 2.4, 3.4);
+const mintKick = new THREE.PointLight(JRV.mint, 0.16, 9, 2.4);
+mintKick.position.set(-4.5, 3.4, 3.4);          // higher + dimmer so it tints the shadow side, not a hot floor spot
 scene.add(mintKick);
 
 // ===== polished-concrete floor (reel 1: subtle blurred reflections + contact shadow) =====
@@ -133,32 +178,33 @@ floor.position.y = -0.002;
 floor.receiveShadow = true;
 scene.add(floor);
 
-// ===== dotted blueprint backdrop (JRV motif, shared with ORI) =====
-function makeDotTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(122,140,170,0.5)';
-  const step = 32;
-  for (let x = step / 2; x < 256; x += step)
-    for (let y = step / 2; y < 256; y += step) {
-      ctx.beginPath(); ctx.arc(x, y, 1.6, 0, Math.PI * 2); ctx.fill();
-    }
-  const t = new THREE.CanvasTexture(c);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(22, 22);
-  return t;
+// ===== falling rain (the reference is mid-downpour) =====
+// LineSegments rather than points so each drop is a short vertical STREAK, which reads
+// as rain at speed. A box of streaks around the car falls each frame and recycles to
+// the top when it passes the floor. Hidden until the reveal SNAP (clay phase is dry).
+const RAIN_N = 1500;
+const RAIN_LEN = 0.55;                            // streak length (world units)
+const RAIN_BOX = { x: 16, z: 16, yTop: 17, yBot: -0.5 };
+const rainPos = new Float32Array(RAIN_N * 2 * 3); // 2 verts (top+bottom) per streak
+const rainSpeed = new Float32Array(RAIN_N);
+for (let i = 0; i < RAIN_N; i++) {
+  const x = (Math.random() * 2 - 1) * RAIN_BOX.x;
+  const z = (Math.random() * 2 - 1) * RAIN_BOX.z;
+  const y = Math.random() * (RAIN_BOX.yTop - RAIN_BOX.yBot) + RAIN_BOX.yBot;
+  const o = i * 6;
+  rainPos[o] = x;     rainPos[o + 1] = y;            rainPos[o + 2] = z; // top
+  rainPos[o + 3] = x; rainPos[o + 4] = y - RAIN_LEN; rainPos[o + 5] = z; // bottom
+  rainSpeed[i] = 14 + Math.random() * 10;
 }
-// backdrop is a large cylinder so the dotted grid wraps behind the orbiting camera
-const backdrop = new THREE.Mesh(
-  new THREE.CylinderGeometry(26, 26, 30, 64, 1, true),
-  new THREE.MeshBasicMaterial({
-    map: makeDotTexture(), transparent: true, opacity: 0.22,
-    side: THREE.BackSide, depthWrite: false,
-  })
+const rainGeo = new THREE.BufferGeometry();
+rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+const rain = new THREE.LineSegments(
+  rainGeo,
+  new THREE.LineBasicMaterial({ color: 0xaebccb, transparent: true, opacity: 0.0, depthWrite: false })
 );
-backdrop.position.y = 8;
-scene.add(backdrop);
+rain.frustumCulled = false;
+rain.visible = false;
+scene.add(rain);
 
 // ===== car =====
 const carRoot = new THREE.Group();           // drift-sway pivot
@@ -256,6 +302,9 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
   });
   junk.forEach((o) => o.removeFromParent());
 
+  // shared flat clay material for the WIP render phase (matte light grey, no reflections)
+  const clayMat = new THREE.MeshStandardMaterial({ color: 0x8d9094, roughness: 0.95, metalness: 0.0 });
+
   car.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = true;
@@ -265,12 +314,14 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
     const name = (m.name || '').toLowerCase();
     m.envMapIntensity = 1.3;
 
+    // build the FINAL material now, but stash it — clay is shown until the reveal snap.
+    let realMat;
     if (/paint|coat|body/.test(name)) {
       // JRV-orange WET clearcoat, matching the reference reveal. A saturated base
       // coat (low-ish metalness so the orange stays vivid) under a mirror clearcoat
       // carrying a droplet normal map — thousands of tiny beaded highlights that read
       // as "freshly washed / just coated". That beading IS the premium signature.
-      o.material = new THREE.MeshPhysicalMaterial({
+      realMat = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(JRV.orange),
         metalness: 0.35,
         roughness: 0.28,
@@ -287,15 +338,17 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
       m.metalness = 0.0;
       m.envMapIntensity = 2.2;
       m.color = new THREE.Color(0x0c1422);
+      realMat = m;
     } else if (/light|lamp|head|tail/.test(name)) {
       m.emissive = new THREE.Color(0xfff2e0);
       m.emissiveIntensity = 1.6;
       m.toneMapped = false;
-      lampMats.push(m);
+      lampMats.push(m);                       // glows only once realMat is assigned (post-snap)
+      realMat = m;
     } else if (/rubber|tire|tyre/.test(name)) {
       // wet tire: dark rubber with a faint clearcoat sheen + droplet beading (the
       // reference tires glisten too). Upgrade to physical so the wet layer reads.
-      o.material = new THREE.MeshPhysicalMaterial({
+      realMat = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(0x0a0b0d),
         roughness: 0.62, metalness: 0.0,
         clearcoat: 0.6, clearcoatRoughness: 0.35,
@@ -310,7 +363,13 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
       m.metalness = 1.0;
       m.roughness = 0.34;
       m.envMapIntensity = 1.6;
+      realMat = m;
+    } else {
+      realMat = m;
     }
+
+    o.userData.realMat = realMat;
+    o.material = clayMat;                       // start as clay; snapToReal() swaps these in
   });
 
   // center on origin, scale to a target length, drop wheels onto the floor (y=0)
@@ -368,8 +427,8 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
   // expose the axis the loop should spin around
   wheels.spinAxis = spinAxis;
 
-  // smoke origins (car-local): all four wheel footprint corners at ground level,
-  // so a hard drift smokes regardless of which Z end the model treats as rear.
+  // spray origins (car-local): all four wheel footprint corners at ground level,
+  // so the rooster-tail kicks regardless of which Z end the model treats as rear.
   rearEmit = [
     new THREE.Vector3(-halfX * 0.62, 0.18, halfZ * 0.55),
     new THREE.Vector3(halfX * 0.62, 0.18, halfZ * 0.55),
@@ -386,58 +445,71 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
   blob.position.y = 0.014;
   carRoot.add(blob);
 
-  loader.classList.add('gone');
+  loadedCar = car;
+
+  if (frozen || reduceMotion) {
+    // screenshots + reduced-motion: skip the reveal animation, go straight to final.
+    snapToReal();
+    loader.classList.add('gone');
+  } else {
+    // begin the clay-render reveal: grey model is already in-scene, now tick the counter.
+    phase = 'clay';
+    document.getElementById('loader').classList.add('revealing'); // drop the opaque bg, keep counter
+  }
 }, undefined, (err) => {
   console.error('GLB load failed', err);
-  loader.querySelector('span').innerHTML = 'COULD NOT LOAD <b>911</b>';
+  const lbl = loader.querySelector('.rev-label');
+  if (lbl) lbl.innerHTML = 'COULD NOT LOAD <b>911</b>';
 });
 
-// ===== tire smoke (reel 2 drift drama) — sprite pool emitted from rear wheels =====
-function makeSmokeTexture() {
+// ===== tire WATER SPRAY (the reference money shot) — bright cool droplets w/ gravity =====
+// Distinct from the warm drift smoke: this is a denser burst of small, bright blue-white
+// droplets kicked UP, OUT and BACK from the spinning tires, arcing down under gravity —
+// the rooster-tail a car throws on a soaking-wet road. Emits whenever the wheels roll.
+let sprayOn = false;
+function makeSprayTexture() {
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
+  c.width = c.height = 64;
   const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 62);
-  g.addColorStop(0, 'rgba(225,228,235,0.9)');
-  g.addColorStop(0.4, 'rgba(200,205,215,0.5)');
-  g.addColorStop(1, 'rgba(200,205,215,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  const g = ctx.createRadialGradient(32, 32, 1, 32, 32, 31);
+  g.addColorStop(0, 'rgba(244,248,255,0.95)');
+  g.addColorStop(0.45, 'rgba(200,216,235,0.55)');
+  g.addColorStop(1, 'rgba(190,208,230,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
   return new THREE.CanvasTexture(c);
 }
-const smokeTex = makeSmokeTexture();
-const SMOKE_N = 90;
-const smoke = [];
-const smokeGroup = new THREE.Group();
-scene.add(smokeGroup);
-for (let i = 0; i < SMOKE_N; i++) {
+const sprayTex = makeSprayTexture();
+const SPRAY_N = 340;
+const spray = [];
+const sprayGroup = new THREE.Group();
+scene.add(sprayGroup);
+for (let i = 0; i < SPRAY_N; i++) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: smokeTex, transparent: true, opacity: 0, depthWrite: false,
-    color: 0xc7ccd6,
+    map: sprayTex, transparent: true, opacity: 0, depthWrite: false, color: 0xeaf2ff,
   }));
   s.visible = false;
-  s.userData = { life: 0, max: 0, vy: 0, vx: 0, vz: 0, spin: 0 };
-  smokeGroup.add(s);
-  smoke.push(s);
+  s.userData = { life: 0, max: 0, vx: 0, vy: 0, vz: 0 };
+  sprayGroup.add(s);
+  spray.push(s);
 }
-let smokeCursor = 0;
-const _emit = new THREE.Vector3();
-function emitSmoke(localPt, drift) {
-  const s = smoke[smokeCursor];
-  smokeCursor = (smokeCursor + 1) % SMOKE_N;
-  _emit.copy(localPt);
-  carRoot.localToWorld(_emit);
-  s.position.copy(_emit);
-  s.position.x += (Math.random() - 0.5) * 0.3;
-  s.position.z += (Math.random() - 0.5) * 0.3;
-  s.userData.max = 1.1 + Math.random() * 0.8;
+let sprayCursor = 0;
+const _spray = new THREE.Vector3();
+function emitSpray(localPt, drift) {
+  const s = spray[sprayCursor];
+  sprayCursor = (sprayCursor + 1) % SPRAY_N;
+  _spray.copy(localPt);
+  carRoot.localToWorld(_spray);
+  s.position.copy(_spray);
+  s.position.x += (Math.random() - 0.5) * 0.22;
+  s.position.z += (Math.random() - 0.5) * 0.22;
+  s.userData.max = 0.55 + Math.random() * 0.55;
   s.userData.life = s.userData.max;
-  s.userData.vy = 0.35 + Math.random() * 0.4;
-  s.userData.vx = (Math.random() - 0.5) * 0.9 - drift * 0.6;
-  s.userData.vz = (Math.random() - 0.5) * 0.9 + 0.5;
-  s.userData.spin = (Math.random() - 0.5) * 0.6;
-  s.scale.setScalar(0.5 + Math.random() * 0.4);
+  // kicked up hard, fanned out sideways, and thrown back off the tread
+  s.userData.vy = 2.6 + Math.random() * 3.0;
+  s.userData.vx = (Math.random() - 0.5) * 3.0 - drift * 1.6;
+  s.userData.vz = (Math.random() - 0.5) * 1.8 - 2.0;   // backward bias (rooster-tail)
+  s.scale.setScalar(0.1 + Math.random() * 0.16);
   s.material.opacity = 0;
-  s.material.rotation = Math.random() * Math.PI;
   s.visible = true;
 }
 
@@ -459,6 +531,7 @@ if (!frozen) {
 // each leg tweens az/el/dist from the previous keyframe over `dur` with `ease`.
 const TAU = Math.PI * 2;
 const easeInOutCubic = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 const easeOutExpo = (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
 const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
 // az: 0=front, +ve swings clockwise. Mix long smooth orbits with fast snaps.
@@ -519,6 +592,17 @@ function animate() {
     RIG.az = azOverride ?? 0.85;
     RIG.el = elOverride ?? 0.6;
     RIG.dist = distOverride ?? 5.7;
+  } else if (phase === 'clay') {
+    // WIP render phase: slow turntable on the grey clay model while the % ticks up
+    if (holdClay) clayT = CLAY_DUR * 0.62; else clayT += dt;   // debug param freezes the counter
+    const p = Math.min(clayT / CLAY_DUR, 1);
+    const e = easeOutCubic(p);
+    RIG.az = 0.55 + p * 0.5; RIG.el = 0.6; RIG.dist = 5.9;
+    const pctEl = document.getElementById('pct');
+    const fillEl = document.getElementById('revfill');
+    if (pctEl) pctEl.textContent = Math.round(e * 100);
+    if (fillEl) fillEl.style.transform = `scaleX(${e})`;
+    if (p >= 1 && !holdClay) snapToReal();
   } else if (!reduceMotion) {
     advanceCinematic(dt);
   } else {
@@ -528,7 +612,7 @@ function animate() {
 
   // ---- car drift-sway (subtle ± yaw so it feels alive while the camera flies) ----
   let drift = 0;
-  if (!frozen && !reduceMotion) {
+  if (phase === 'done' && !reduceMotion) {
     driftPhase += dt;
     drift = Math.sin(driftPhase * 0.9) * 0.14 + Math.sin(driftPhase * 2.3) * 0.04;
   }
@@ -536,33 +620,49 @@ function animate() {
   carRoot.rotation.z = -drift * 0.05;
 
   // ---- wheels spin (rolling around the axle/width axis) ----
-  if (!reduceMotion && !frozen && wheels.length) {
+  if (phase === 'done' && !reduceMotion && wheels.length) {
     const ws = 9.0;
     const axis = wheels.spinAxis || 'x';
     for (const w of wheels) w.rotation[axis] += ws * dt;
   }
 
-  // ---- tire smoke from rear wheels, scaled by drift intensity ----
-  if (!reduceMotion && !frozen && rearEmit.length) {
-    const intensity = 0.5 + Math.abs(Math.sin(driftPhase * 0.9)) * 1.0;
-    const rate = intensity * 3.2;               // particles this frame (fractional)
-    if (Math.random() < rate * dt * 12) {
-      emitSmoke(rearEmit[Math.random() < 0.5 ? 0 : 1], drift);
+  // ---- rain: fall + recycle streaks, fade in after the reveal ----
+  if (rain.visible) {
+    const rm = rain.material;
+    if (rm.opacity < 0.32) rm.opacity = Math.min(0.32, rm.opacity + dt * 0.5);
+    const pos = rainGeo.attributes.position.array;
+    for (let i = 0; i < RAIN_N; i++) {
+      const o = i * 6, d = rainSpeed[i] * dt;
+      pos[o + 1] -= d; pos[o + 4] -= d;
+      if (pos[o + 4] < RAIN_BOX.yBot) {
+        const x = (Math.random() * 2 - 1) * RAIN_BOX.x, z = (Math.random() * 2 - 1) * RAIN_BOX.z;
+        pos[o] = x; pos[o + 1] = RAIN_BOX.yTop; pos[o + 2] = z;
+        pos[o + 3] = x; pos[o + 4] = RAIN_BOX.yTop - RAIN_LEN; pos[o + 5] = z;
+      }
+    }
+    rainGeo.attributes.position.needsUpdate = true;
+  }
+
+  // ---- tire WATER SPRAY off the spinning rear wheels (replaces dry drift smoke) ----
+  if (sprayOn && !reduceMotion && rearEmit.length) {
+    const burst = 7 + Math.round(Math.abs(Math.sin(driftPhase * 0.9)) * 6); // heavier on drift
+    for (let k = 0; k < burst; k++) {
+      emitSpray(rearEmit[Math.random() < 0.5 ? 0 : 1], drift);
     }
   }
-  for (const s of smoke) {
+  for (const s of spray) {
     if (!s.visible) continue;
     const u = s.userData;
     u.life -= dt;
     if (u.life <= 0) { s.visible = false; s.material.opacity = 0; continue; }
+    u.vy -= 6.6 * dt;                            // gravity → the rooster-tail arcs down
     s.position.x += u.vx * dt;
     s.position.y += u.vy * dt;
     s.position.z += u.vz * dt;
-    u.vy *= 0.985;
-    const age = 1 - u.life / u.max;             // 0→1
-    s.scale.setScalar((0.5 + age * 2.4));
-    s.material.opacity = Math.sin(Math.min(age, 1) * Math.PI) * 0.34;  // fade in/out
-    s.material.rotation += u.spin * dt;
+    if (s.position.y < 0.02) { s.position.y = 0.02; u.vy *= -0.25; u.vx *= 0.5; u.vz *= 0.5; } // splash
+    const age = 1 - u.life / u.max;
+    s.material.opacity = Math.sin(Math.min(age, 1) * Math.PI) * 0.9;
+    s.scale.setScalar(0.08 + age * 0.24);
   }
 
   // ---- headlight breathing pulse ----

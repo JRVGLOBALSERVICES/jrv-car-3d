@@ -3,8 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>JRV · 911 studio showcase</title>
-    <meta name="description" content="A Porsche 911 in an auto-shop studio — a cinematic camera orbits and whip-pans the car while it holds a drift, rear wheels trailing smoke. Built in Three.js with a real HDRI, strip-light clearcoat reflections and bloom headlights by JRV." />
+    <title>JRV · 911 rain reveal</title>
+    <meta name="description" content="A Porsche 911 renders in from a grey clay model, then snaps to life on a rain-soaked forest road — wet orange clearcoat beaded with water, tyres throwing a spray rooster-tail as the camera orbits. Built in Three.js with a Poly Haven forest HDRI, falling rain and bloom by JRV." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
@@ -76,15 +76,34 @@
       }
       .credit a { color: inherit; }
 
-      /* --- loader --- */
+      /* --- render-reveal loader (clay → snap) --- */
       #loader {
         position: fixed; inset: 0; z-index: 3; display: grid; place-items: center;
-        background: var(--color-bg); transition: opacity var(--dur-mid) var(--ease-out);
-        font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.3em;
+        background: var(--color-bg);
+        transition: opacity var(--dur-mid) var(--ease-out), background var(--dur-mid) var(--ease-out);
+      }
+      /* once the clay model is in-scene, drop to a thin veil so the grey "render" shows through */
+      #loader.revealing { background: rgba(8, 10, 12, 0.34); }
+      #loader.gone { opacity: 0; pointer-events: none; }
+      .rev { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .rev-pct {
+        font-family: var(--font-mono); font-weight: 500;
+        font-size: clamp(56px, 14vw, 132px); line-height: 1; letter-spacing: -0.04em;
+        color: var(--color-ink); font-variant-numeric: tabular-nums;
+      }
+      .rev-pct i { font-style: normal; font-size: 0.36em; color: var(--color-ink-dim); margin-left: 4px; }
+      .rev-label {
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.34em;
         text-transform: uppercase; color: var(--color-ink-dim);
       }
-      #loader.gone { opacity: 0; pointer-events: none; }
-      #loader span b { color: var(--color-accent); }
+      .rev-label b { color: var(--color-accent); }
+      .rev-bar { width: min(280px, 60vw); height: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+      #revfill { height: 100%; width: 100%; transform: scaleX(0); transform-origin: left; background: var(--color-accent); }
+
+      /* white flash on the reveal snap */
+      #flash { position: fixed; inset: 0; z-index: 4; pointer-events: none; background: #fff; opacity: 0; }
+      #flash.fire { animation: flashfire 0.42s var(--ease-out); }
+      @keyframes flashfire { 0% { opacity: 0; } 16% { opacity: 0.5; } 100% { opacity: 0; } }
 
       @media (max-width: 640px) {
         .brand, .name { left: var(--space-md); }
@@ -96,6 +115,7 @@
       }
       @media (prefers-reduced-motion: reduce) {
         #loader { transition: none; }
+        #flash.fire { animation: none; }
       }
     </style>
   </head>
@@ -110,18 +130,25 @@
       <div class="coords">HEADING <b id="heading">000°</b></div>
       <div class="name">
         <h1>Take the <em>wheel</em></h1>
-        <p>An auto-shop studio cut — the camera orbits and snaps around the 911 as it holds a drift, rear wheels trailing smoke. Move your cursor to nudge the view.</p>
+        <p>It renders in from clay — then the rain hits. A wet 911 on a forest road, tyres throwing spray as the camera orbits. Move your cursor to nudge the view.</p>
       </div>
       <div class="hint">
-        <div><span class="dot"></span>cinematic auto-orbit · drift smoke</div>
-        <div>three.js · hdri clearcoat · bloom</div>
+        <div><span class="dot"></span>render reveal · rain · tyre spray</div>
+        <div>three.js · forest hdri · wet clearcoat</div>
       </div>
       <div class="credit">
-        Model: <a href="https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf" target="_blank" rel="noopener">“(FREE) Porsche 911 Carrera 4S”</a> by Karol Miklas — CC-BY-SA-4.0
+        Model: <a href="https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf" target="_blank" rel="noopener">“(FREE) Porsche 911 Carrera 4S”</a> by Karol Miklas — CC-BY-SA-4.0 · HDRI: <a href="https://polyhaven.com/a/niederwihl_forest" target="_blank" rel="noopener">Niederwihl Forest</a> — Poly Haven CC0
       </div>
     </div>
 
-    <div id="loader"><span>WARMING UP <b>911</b>…</span></div>
+    <div id="loader">
+      <div class="rev">
+        <div class="rev-pct"><span id="pct">0</span><i>%</i></div>
+        <span class="rev-label">RENDERING <b>911</b></span>
+        <div class="rev-bar"><div id="revfill"></div></div>
+      </div>
+    </div>
+    <div id="flash"></div>
 
     <script type="module" src="/src/main.js"></script>
   </body>
