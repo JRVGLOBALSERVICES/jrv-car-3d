@@ -1,0 +1,41 @@
+/* Hallmark · component: 3D-hero-scene · genre: atmospheric · theme: studied-DNA (source: jrv-systems-new + jrv_car_rental_front_new)
+ * JRV brand tokens lifted verbatim from both repos. OKLCH for the page chrome; the Three.js scene reads the hex equivalents.
+ * Shared with the ORI robot scene — same JRV studio language, different hero object.
+ */
+:root {
+  /* --- JRV brand (hex source of truth, from the two repos) --- */
+  --jrv-orange: #F15828;        /* primary — both repos */
+  --jrv-orange-dark: #C8451E;   /* car-rental primary-dark */
+  --jrv-orange-soft: #F47A55;   /* systems orange-soft */
+  --jrv-mint: #00FF88;          /* systems energy green */
+  --jrv-mint-deep: #00B560;
+  --jrv-navy: #0B0F1E;          /* systems deep ink */
+  --jrv-black: #02071B;         /* car-rental near-black */
+  --jrv-bone: #FAF6EE;          /* systems paper */
+  --jrv-bone-dim: #EFEAE0;
+
+  /* --- OKLCH equivalents for the page chrome (atmospheric, dark) --- */
+  --color-bg: oklch(16% 0.03 264);          /* deep navy backdrop */
+  --color-bg-2: oklch(10% 0.02 264);
+  --color-ink: oklch(96% 0.012 80);         /* bone text */
+  --color-ink-dim: oklch(72% 0.012 80 / 0.66);
+  --color-accent: oklch(64% 0.19 38);       /* JRV orange */
+  --color-glow: oklch(88% 0.24 158);        /* mint glow */
+  --color-line: oklch(70% 0.02 264 / 0.16); /* dotted blueprint lines */
+
+  /* --- type --- */
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+
+  /* --- motion --- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 180ms;
+  --dur-mid: 420ms;
+
+  /* --- space (4pt) --- */
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 32px;
+  --space-xl: 64px;
+}

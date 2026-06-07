@@ -1,0 +1,18 @@
+{
+  "name": "jrv-car-3d",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "JRV interactive sport car — a Porsche 911 in Three.js that turns to face your cursor / tap. IBL + clearcoat carpaint, bloom headlights, idle turntable.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.171.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.10"
+  }
+}

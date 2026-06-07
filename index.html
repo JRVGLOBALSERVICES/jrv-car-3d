@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>JRV · interactive 911</title>
+    <meta name="description" content="A Porsche 911 you can steer with your cursor — it turns to face you on desktop and your tap on mobile. Built in Three.js with IBL clearcoat carpaint and bloom headlights by JRV." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/tokens.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
+      body {
+        font-family: var(--font-display);
+        color: var(--color-ink);
+        background:
+          radial-gradient(120% 90% at 50% 10%, var(--color-bg) 0%, var(--color-bg-2) 72%);
+      }
+      #scene { position: fixed; inset: 0; display: block; touch-action: none; }
+
+      /* --- chrome overlay --- */
+      .chrome { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
+      .brand {
+        position: absolute; top: var(--space-lg); left: var(--space-lg);
+        display: flex; align-items: baseline; gap: 10px;
+      }
+      .brand .mark {
+        font-weight: 700; font-size: 22px; letter-spacing: -0.02em;
+        color: var(--color-ink);
+      }
+      .brand .mark b { color: var(--color-accent); }
+      .brand .sub {
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.28em;
+        text-transform: uppercase; color: var(--color-ink-dim);
+      }
+      .name {
+        position: absolute; left: var(--space-lg); bottom: var(--space-xl);
+        max-width: min(480px, 80vw);
+      }
+      .name h1 {
+        font-size: clamp(44px, min(9vw, 13vh), 104px);
+        font-weight: 700; line-height: 0.92; letter-spacing: -0.03em;
+        color: var(--color-ink);
+      }
+      .name h1 em { font-style: normal; color: var(--color-accent); }
+      .name p {
+        margin-top: var(--space-md);
+        font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+        color: var(--color-ink-dim); max-width: 42ch;
+      }
+      .hint {
+        position: absolute; right: var(--space-lg); bottom: var(--space-xl);
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em;
+        text-transform: uppercase; color: var(--color-ink-dim);
+        text-align: right; line-height: 2;
+      }
+      .hint .dot {
+        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+        background: var(--color-glow); margin-right: 8px; vertical-align: middle;
+        box-shadow: 0 0 10px var(--color-glow);
+      }
+      .coords {
+        position: absolute; top: var(--space-lg); right: var(--space-lg);
+        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
+        color: var(--color-ink-dim);
+      }
+      .coords b { color: var(--color-glow); font-weight: 500; }
+      .credit {
+        position: absolute; left: 50%; transform: translateX(-50%);
+        bottom: var(--space-md);
+        font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+        color: var(--color-ink-dim); opacity: 0.5; pointer-events: auto;
+        text-align: center;
+      }
+      .credit a { color: inherit; }
+
+      /* --- loader --- */
+      #loader {
+        position: fixed; inset: 0; z-index: 3; display: grid; place-items: center;
+        background: var(--color-bg); transition: opacity var(--dur-mid) var(--ease-out);
+        font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.3em;
+        text-transform: uppercase; color: var(--color-ink-dim);
+      }
+      #loader.gone { opacity: 0; pointer-events: none; }
+      #loader span b { color: var(--color-accent); }
+
+      @media (max-width: 640px) {
+        .brand, .name { left: var(--space-md); }
+        .brand { top: var(--space-md); }
+        .coords { top: var(--space-md); right: var(--space-md); }
+        .name { bottom: 104px; }
+        .hint { right: var(--space-md); bottom: 48px; }
+        .credit { bottom: 8px; font-size: 9px; padding: 0 12px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #loader { transition: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div class="chrome">
+      <div class="brand">
+        <span class="mark">JRV<b>.</b></span>
+        <span class="sub">Systems</span>
+      </div>
+      <div class="coords">HEADING <b id="heading">000°</b></div>
+      <div class="name">
+        <h1>Take the <em>wheel</em></h1>
+        <p>Move your cursor — the 911 turns to meet your eye. On mobile, tap to set its heading. Leave it be and it idles on a slow turntable.</p>
+      </div>
+      <div class="hint">
+        <div><span class="dot"></span>cursor &amp; tap steering</div>
+        <div>three.js · ibl clearcoat · bloom</div>
+      </div>
+      <div class="credit">
+        Model: <a href="https://sketchfab.com/3d-models/free-porsche-911-carrera-4s-d01b254483794de3819786d93e0e1ebf" target="_blank" rel="noopener">“(FREE) Porsche 911 Carrera 4S”</a> by Karol Miklas — CC-BY-SA-4.0
+      </div>
+    </div>
+
+    <div id="loader"><span>WARMING UP <b>911</b>…</span></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
