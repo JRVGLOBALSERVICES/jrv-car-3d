@@ -104,8 +104,8 @@ function fitCamera() {
   const aspect = innerWidth / innerHeight;
   camera.aspect = aspect;
   let scale = 1;
-  if (aspect < 1) scale = 1 + (1 - aspect) * 1.2;
-  else if (aspect < 1.3) scale = 1 + (1.3 - aspect) * 0.5;
+  if (aspect < 1) scale = 1 + (1 - aspect) * 2.1;        // portrait: pull back hard so the whole car fits
+  else if (aspect < 1.3) scale = 1 + (1.3 - aspect) * 0.7;
   camScale = scale;
   camera.updateProjectionMatrix();
 }
