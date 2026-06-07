@@ -142,14 +142,37 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(14, 96),
-  new THREE.MeshStandardMaterial({ color: 0x06090c, roughness: 0.12, metalness: 0.25, envMapIntensity: 1.2 })
+// wide dark wet apron fills the void out to the fog so we never see canvas edge
+const apron = new THREE.Mesh(
+  new THREE.PlaneGeometry(160, 160),
+  new THREE.MeshStandardMaterial({ color: 0x05070a, roughness: 0.22, metalness: 0.3, envMapIntensity: 0.9 })
 );
-floor.rotation.x = -Math.PI / 2;
-floor.position.y = -0.002;
-floor.receiveShadow = true;
-scene.add(floor);
+apron.rotation.x = -Math.PI / 2;
+apron.position.y = -0.004;
+apron.receiveShadow = true;
+scene.add(apron);
+
+// ===== wet ROAD strip — scrolls under the car to read as forward motion =====
+// roadGroup is re-aimed every frame to the car's true heading (see loop), so the
+// lane dashes always flow straight down the car's travel axis.
+const roadTex = makeRoadTexture();
+roadTex.wrapS = roadTex.wrapT = THREE.RepeatWrapping;
+roadTex.repeat.set(1, 16);                 // many dash cycles down the length
+roadTex.anisotropy = 8;
+const roadGroup = new THREE.Group();
+scene.add(roadGroup);
+const road = new THREE.Mesh(
+  new THREE.PlaneGeometry(7.2, 90),
+  new THREE.MeshStandardMaterial({
+    map: roadTex, color: 0xffffff,
+    roughness: 0.16, metalness: 0.5, envMapIntensity: 1.35,
+  })
+);
+road.rotation.x = -Math.PI / 2;
+road.position.y = -0.001;
+road.receiveShadow = true;
+roadGroup.add(road);
+const ROAD_SPEED = 2.4;                     // texture units / sec — the sense of speed
 
 // ===== falling rain =====
 const RAIN_N = 1400;
@@ -182,6 +205,8 @@ scene.add(carRoot);
 let BASE_YAW = -0.5;
 const lampMats = [];
 const wheels = [];                 // 4 hub pivots, spun each frame
+const rearWheels = [];             // the 2 rear pivots — smoke emitters
+const localForward = new THREE.Vector3(0, 0, 1);  // car travel axis in carRoot-local space
 let frontWheelWorld = new THREE.Vector3(1.2, 0.35, 1.6);  // tight-reveal target (replaced on load)
 
 const draco = new DRACOLoader();
@@ -281,27 +306,45 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
   // This is the front-rim fix: every wheel rotates about ITS OWN hub center (not a shared
   // axle-pair pivot), so front and rear roll identically. Width axis = the shorter span.
   const spinAxis = size.x < size.z ? 'x' : 'z';
+  // GLTFLoader names the mesh primitives "Object_N"; the descriptive "wheels_20x9"
+  // label lives on a PARENT group — so test the ancestor chain, not o.name.
+  const isWheelPart = (obj) => {
+    let n = obj;
+    for (let i = 0; i < 5 && n; i++) { if (/wheels_20x9/i.test(n.name || '')) return true; n = n.parent; }
+    return false;
+  };
   const buckets = new Map();        // "sx_sz" -> [meshes]
   car.traverse((o) => {
     if (!o.isMesh) return;
-    if (!/wheels_20x9/i.test(o.name || '')) return;
+    if (!isWheelPart(o)) return;
     const c = new THREE.Box3().setFromObject(o).getCenter(new THREE.Vector3());
     const lc = carRoot.worldToLocal(c.clone());
     const k = `${lc.x >= 0 ? 'R' : 'L'}_${lc.z >= 0 ? 'F' : 'B'}`;
     if (!buckets.has(k)) buckets.set(k, []);
     buckets.get(k).push(o);
   });
-  for (const group of buckets.values()) {
+  const frontLocal = new THREE.Vector3(), rearLocal = new THREE.Vector3();
+  let nF = 0, nR = 0;
+  for (const [k, group] of buckets.entries()) {
     const wb = new THREE.Box3();
     for (const m of group) wb.expandByObject(m);
     const wc = wb.getCenter(new THREE.Vector3());
     const pivot = new THREE.Group();
     pivot.position.copy(carRoot.worldToLocal(wc.clone()));
+    pivot.userData.rear = k.endsWith('B');     // bucket key R_F / L_B etc.
     carRoot.add(pivot);
     for (const m of group) pivot.attach(m);
     wheels.push(pivot);
+    if (pivot.userData.rear) { rearLocal.add(pivot.position); nR++; }
+    else { frontLocal.add(pivot.position); nF++; }
+    if (pivot.userData.rear) rearWheels.push(pivot);
   }
   wheels.spinAxis = spinAxis;
+  // car forward axis in carRoot-LOCAL space (front-axle mid → rear-axle mid, negated = travel dir)
+  if (nF && nR) {
+    frontLocal.multiplyScalar(1 / nF); rearLocal.multiplyScalar(1 / nR);
+    localForward.copy(frontLocal).sub(rearLocal); localForward.y = 0; localForward.normalize();
+  }
 
   // a front wheel world-center for the tight reveal framing (pick the +Z, +X corner)
   let best = null;
@@ -347,6 +390,92 @@ function makeBlobTexture() {
   ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 256);
   return new THREE.CanvasTexture(c);
 }
+
+// wet-asphalt road with a dashed centre line + faint lane edges — tiles down its length
+function makeRoadTexture() {
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 1024;
+  const ctx = c.getContext('2d');
+  // asphalt base with subtle speckle
+  ctx.fillStyle = '#0a0d11'; ctx.fillRect(0, 0, 256, 1024);
+  for (let i = 0; i < 2600; i++) {
+    const v = 8 + Math.floor(Math.random() * 22);
+    ctx.fillStyle = `rgba(${v},${v + 2},${v + 5},${0.25 + Math.random() * 0.3})`;
+    ctx.fillRect(Math.random() * 256, Math.random() * 1024, 1.4, 1.4);
+  }
+  // lane edge lines
+  ctx.fillStyle = 'rgba(190,196,205,0.5)';
+  ctx.fillRect(26, 0, 5, 1024);
+  ctx.fillRect(225, 0, 5, 1024);
+  // dashed centre line (2 dashes per tile so it reads fast)
+  ctx.fillStyle = 'rgba(225,210,150,0.78)';
+  ctx.fillRect(123, 80, 10, 240);
+  ctx.fillRect(123, 592, 10, 240);
+  return new THREE.CanvasTexture(c);
+}
+
+// soft smoke puff (greyscale radial)
+function makeSmokeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 2, 64, 64, 62);
+  g.addColorStop(0, 'rgba(225,227,230,0.95)');
+  g.addColorStop(0.45, 'rgba(165,170,178,0.5)');
+  g.addColorStop(1, 'rgba(140,145,152,0)');
+  x.fillStyle = g; x.beginPath(); x.arc(64, 64, 62, 0, Math.PI * 2); x.fill();
+  return new THREE.CanvasTexture(c);
+}
+
+// ===== smoke pool — billboard sprites trailing off the rear wheels (the "moving" tell) =====
+const SMOKE_N = 150;
+const smokeTex = makeSmokeTexture();
+const smokeSprites = [];
+const smokeState = [];
+for (let i = 0; i < SMOKE_N; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: smokeTex, transparent: true, depthWrite: false, opacity: 0, color: 0x9aa0a8,
+  }));
+  s.scale.set(0.001, 0.001, 1);
+  s.visible = false;
+  scene.add(s);
+  smokeSprites.push(s);
+  smokeState.push({ active: false, life: 0, max: 1, vx: 0, vy: 0, vz: 0, s0: 0.2, s1: 1, peak: 0.4 });
+}
+let smokeCursor = 0;
+function emitSmoke(px, py, pz, back) {
+  const st = smokeState[smokeCursor], sp = smokeSprites[smokeCursor];
+  smokeCursor = (smokeCursor + 1) % SMOKE_N;
+  st.active = true; st.life = 0; st.max = 0.9 + Math.random() * 0.7;
+  sp.position.set(px + (Math.random() - 0.5) * 0.22, py + Math.random() * 0.08, pz + (Math.random() - 0.5) * 0.22);
+  st.vx = back.x * (1.7 + Math.random() * 1.1) + (Math.random() - 0.5) * 0.35;   // trail BACK, away from the car
+  st.vz = back.z * (1.7 + Math.random() * 1.1) + (Math.random() - 0.5) * 0.35;
+  st.vy = 0.28 + Math.random() * 0.5;
+  st.s0 = 0.12 + Math.random() * 0.1;
+  st.s1 = 0.7 + Math.random() * 0.6;
+  st.peak = 0.14 + Math.random() * 0.16;
+  sp.visible = true;
+}
+function updateSmoke(dt) {
+  for (let i = 0; i < SMOKE_N; i++) {
+    const st = smokeState[i];
+    if (!st.active) continue;
+    const sp = smokeSprites[i];
+    st.life += dt;
+    const p = st.life / st.max;
+    if (p >= 1) { st.active = false; sp.visible = false; continue; }
+    st.vy += dt * 0.22;            // buoyancy
+    sp.position.x += st.vx * dt;
+    sp.position.y += st.vy * dt;
+    sp.position.z += st.vz * dt;
+    st.vx *= (1 - dt * 0.9); st.vz *= (1 - dt * 0.9);
+    const sc = st.s0 + (st.s1 - st.s0) * easeOutCubic(p);
+    sp.scale.set(sc, sc, 1);
+    sp.material.opacity = p < 0.18 ? (p / 0.18) * st.peak : st.peak * (1 - (p - 0.18) / 0.82);
+  }
+}
+let smokeAccum = 0;
+let seededSmoke = false;
 
 // ===== postprocessing (subtle bloom on lights only) =====
 const composer = new EffectComposer(renderer);
@@ -458,39 +587,88 @@ function animate() {
     camera.lookAt(_look);
     if (p >= 1) { phase = 'done'; legIdx = 0; legT = 0; prevKey = { az: HERO.az, el: HERO.el, dist: HERO.dist }; }
   } else if (!reduceMotion) {
-    advanceCinematic(dt);
+    // DRIVING tracking shot — camera holds a front-3/4 and weaves gently while the
+    // road scrolls underneath (that's what sells "moving"); no full turntable spin.
+    RIG.az = HERO.az + Math.sin(t * 0.16) * 0.45 + Math.sin(t * 0.41) * 0.08;
+    RIG.el = HERO.el + Math.sin(t * 0.26) * 0.05;
+    RIG.dist = HERO.dist - 0.3 + Math.sin(t * 0.12) * 0.4;
     rigToPos(RIG.az, RIG.el, RIG.dist, _camPos);
     camera.position.copy(_camPos);
-    camera.lookAt(0, LOOK_H, 0);
+    camera.lookAt(0, LOOK_H + Math.sin(t * 7.0) * 0.01, 0);
   } else {
     rigToPos(HERO.az, HERO.el, HERO.dist, _camPos);
     camera.position.copy(_camPos);
     camera.lookAt(0, LOOK_H, 0);
   }
 
-  // ---- car drift-sway (only once revealed) ----
-  let drift = 0;
-  if (phase === 'done' && !reduceMotion) {
+  // ---- car heading + suspension (driving feel once revealed) ----
+  const driving = phase === 'done' && !reduceMotion;
+  if (driving) {
     driftPhase += dt;
-    drift = Math.sin(driftPhase * 0.8) * 0.05;
+    carRoot.rotation.y = BASE_YAW + Math.sin(t * 0.7) * 0.022;       // faint steering weave
+    carRoot.position.y = Math.sin(t * 7.3) * 0.012 + Math.sin(t * 11.7) * 0.006;  // road chatter
+    carRoot.rotation.z = Math.sin(t * 5.5) * 0.006;                  // body roll
+    carRoot.rotation.x = Math.sin(t * 6.3) * 0.004;                  // pitch
+  } else {
+    carRoot.rotation.y = BASE_YAW;
+    carRoot.position.y = 0;
+    carRoot.rotation.z = 0; carRoot.rotation.x = 0;
   }
-  carRoot.rotation.y = BASE_YAW + drift;
 
-  // ---- wheels roll about their own hub (front + rear identical) ----
-  if ((phase === 'done' || phase === 'pull') && !reduceMotion && wheels.length) {
-    const ws = 7.0;
-    const axis = wheels.spinAxis || 'x';
-    for (const w of wheels) w.rotation[axis] += ws * dt;
+  // ---- world travel direction (drives road heading, smoke, rain slant) ----
+  const wf = localForward.clone().applyQuaternion(carRoot.quaternion);
+  wf.y = 0;
+  if (wf.lengthSq() > 1e-6) wf.normalize(); else wf.set(0, 0, 1);
+  roadGroup.rotation.y = Math.atan2(wf.x, wf.z);
+
+  // ---- scroll the road + spin wheels (matched so it reads as rolling, not sliding) ----
+  if ((phase === 'done' || phase === 'pull') && !reduceMotion) {
+    if (carModel) roadTex.offset.y = (roadTex.offset.y + ROAD_SPEED * dt) % 1;
+    if (wheels.length) {
+      const ws = 16.0;                       // fast — matches the road rush
+      const axis = wheels.spinAxis || 'x';
+      for (const w of wheels) w.rotation[axis] += ws * dt;
+    }
   }
+
+  // ---- tyre/exhaust smoke trailing off the rear wheels ----
+  if (driving && rearWheels.length) {
+    const back = wf.clone().multiplyScalar(-1);
+    // frozen screenshots: headless throttles rAF so smoke can't accumulate —
+    // pre-simulate ~2s of trail in one frame so the still shows the real plume.
+    const step = 1 / 17;                      // ~17 puffs/sec per rear wheel — a plume, not a bomb
+    if (frozen && !seededSmoke) {
+      seededSmoke = true;
+      const _w = new THREE.Vector3();
+      let acc = 0;
+      for (let k = 0; k < 130; k++) {         // pre-sim at the real cadence → real steady-state density
+        acc += 0.02;
+        while (acc >= step) { acc -= step; for (const rw of rearWheels) { rw.getWorldPosition(_w); emitSmoke(_w.x, 0.08, _w.z, back); } }
+        updateSmoke(0.02);
+      }
+    }
+    smokeAccum += dt;
+    const _wp = new THREE.Vector3();
+    while (smokeAccum >= step) {
+      smokeAccum -= step;
+      for (const rw of rearWheels) {
+        rw.getWorldPosition(_wp);
+        emitSmoke(_wp.x, 0.08, _wp.z, back);
+      }
+    }
+  }
+  updateSmoke(dt);
 
   // ---- rain ----
   if (rain.visible) {
     const rm = rain.material;
     if (rm.opacity < 0.3) rm.opacity = Math.min(0.3, rm.opacity + dt * 0.5);
     const pos = rainGeo.attributes.position.array;
+    const hx = -wf.x * 5.5 * dt, hz = -wf.z * 5.5 * dt;   // lean streaks back along travel
     for (let i = 0; i < RAIN_N; i++) {
       const o = i * 6, d = rainSpeed[i] * dt;
       pos[o + 1] -= d; pos[o + 4] -= d;
+      pos[o] += hx; pos[o + 2] += hz; pos[o + 3] += hx; pos[o + 5] += hz;
       if (pos[o + 4] < RAIN_BOX.yBot) {
         const x = (Math.random() * 2 - 1) * RAIN_BOX.x, z = (Math.random() * 2 - 1) * RAIN_BOX.z;
         pos[o] = x; pos[o + 1] = RAIN_BOX.yTop; pos[o + 2] = z;
