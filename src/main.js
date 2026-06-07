@@ -133,6 +133,20 @@ const rim = new THREE.DirectionalLight(0xeaf2ff, 0.8);
 rim.position.set(-2, 3, -7);
 scene.add(rim);
 
+// soft front fill — lifts the car's face out of shadow at ANY orbit angle once
+// you start dragging the camera around (the 3-point rig alone leaves the rear
+// dark when you swing behind it). Kept low so the HDRI still leads.
+const frontFill = new THREE.DirectionalLight(0xffffff, 0.45);
+frontFill.position.set(0, 3.5, 8);
+scene.add(frontFill);
+
+// ONE brand accent — a warm JRV-orange kiss along the near flank. Restraint:
+// a single tinted light reads as a signature glint on the wet paint, not a
+// stage-gel disco. No second colour gel (that's the AI-slop tell).
+const accent = new THREE.DirectionalLight(JRV.orange, 0.5);
+accent.position.set(6, 2.2, 3.5);
+scene.add(accent);
+
 // ===== wet floor (mirror-dark asphalt, like the reference's rain-soaked road) =====
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(120, 120),
@@ -546,6 +560,42 @@ function rigToPos(az, el, dist, out) {
   return out;
 }
 
+// ===== user drag-orbit — grab the scene to steer the camera =====
+// Horizontal drag swings the view left↔right (full circle); vertical drag tilts
+// between a near top-down look and just above the road. Clamped so the camera
+// NEVER dips below the road plane. Pointer events cover mouse + touch (mobile),
+// and #scene already has `touch-action:none` so a drag won't scroll the page.
+const userControl = { active: false, az: HERO.az, polar: 1.15, radius: HERO.dist * 1.05 };
+const userTarget = { az: HERO.az, polar: 1.15 };
+const POLAR_TOP = 0.18;     // ~10° off vertical → top-down view
+const POLAR_FLOOR = 1.46;   // ~84° → just above the road, never below it
+let dragging = false, dragX = 0, dragY = 0;
+
+if (!frozen) {
+  canvas.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    dragX = e.clientX; dragY = e.clientY;
+    // seed the orbit from wherever the auto-camera is RIGHT NOW → no jump on grab
+    const dx = camera.position.x, dy = camera.position.y - LOOK_H, dz = camera.position.z;
+    const r = Math.max(2.5, Math.hypot(dx, dy, dz));
+    userControl.radius = r;
+    userTarget.polar = userControl.polar = THREE.MathUtils.clamp(Math.acos(dy / r), POLAR_TOP, POLAR_FLOOR);
+    userTarget.az = userControl.az = Math.atan2(dx, dz);
+    userControl.active = true;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragX, dy = e.clientY - dragY;
+    dragX = e.clientX; dragY = e.clientY;
+    userTarget.az -= dx * 0.005;                                                   // drag right → orbit right
+    userTarget.polar = THREE.MathUtils.clamp(userTarget.polar + dy * 0.005, POLAR_TOP, POLAR_FLOOR);
+  });
+  const endDrag = (e) => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+}
+
 // ===== loop =====
 const clock = new THREE.Clock();
 let driftPhase = 0;
@@ -595,6 +645,14 @@ function animate() {
     _look.set(THREE.MathUtils.lerp(f.x * 0.4, 0, e), THREE.MathUtils.lerp(f.y + 0.05, LOOK_H, e), THREE.MathUtils.lerp(f.z * 0.4, 0, e));
     camera.lookAt(_look);
     if (p >= 1) { phase = 'done'; legIdx = 0; legT = 0; prevKey = { az: HERO.az, el: HERO.el, dist: HERO.dist }; }
+  } else if (userControl.active) {
+    // user is steering — damped orbit, clamped to left↔right + top view, above the road
+    userControl.az += (userTarget.az - userControl.az) * 0.12;
+    userControl.polar += (userTarget.polar - userControl.polar) * 0.12;
+    const sp = Math.sin(userControl.polar), R = userControl.radius;
+    _camPos.set(Math.sin(userControl.az) * sp * R, LOOK_H + Math.cos(userControl.polar) * R, Math.cos(userControl.az) * sp * R);
+    camera.position.copy(_camPos);
+    camera.lookAt(0, LOOK_H, 0);
   } else if (!reduceMotion) {
     // DRIVING tracking shot — camera holds a front-3/4 and weaves gently while the
     // road scrolls underneath (that's what sells "moving"); no full turntable spin.
