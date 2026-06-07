@@ -255,8 +255,12 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
       return p;
     }
     if (/(?<!head|tail|brake)glass|blackglass|glass_int/.test(name) || name === 'twixer_992_glass.002' || /glass\.\d/.test(name)) {
-      m.transparent = true; m.opacity = 0.34; m.roughness = 0.03; m.metalness = 0.0;
-      m.color = new THREE.Color(0x0b1018); m.envMapIntensity = 2.4; m.depthWrite = false;
+      // tinted automotive glass. Low roughness + high envMap made the whole
+      // greenhouse mirror the bright sky and blow out to a solid white pane
+      // (read as "broken windscreen"). Soften the reflection and add body so it
+      // reads as dark tinted glass you can see the cabin through.
+      m.transparent = true; m.opacity = 0.62; m.roughness = 0.14; m.metalness = 0.0;
+      m.color = new THREE.Color(0x090d13); m.envMapIntensity = 0.9; m.depthWrite = false;
       return m;
     }
     if (/headlight|taillight|brakelight|led_light|running/.test(name)) {
@@ -272,7 +276,12 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
       return m;
     }
     if (/chrome|antichrome|metal_radiator|exhausttip/.test(name)) {
-      m.metalness = 1.0; m.roughness = 0.18; m.envMapIntensity = 2.0;
+      // The wing-mirror face + window trim are chrome. The GLB ships antichrome
+      // as an alphaMode:BLEND material (opacity ~0.17), so GLTFLoader left it
+      // transparent — the mirror face rendered as a see-through stub. Force it
+      // opaque, and soften the reflection so the mirror doesn't blow to white.
+      m.metalness = 1.0; m.roughness = 0.26; m.envMapIntensity = 1.15;
+      m.transparent = false; m.opacity = 1;
       return m;
     }
     if (/gt3rs_black|plastic_mgl|^twixer_992\.001$/.test(name)) {
