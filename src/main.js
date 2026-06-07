@@ -37,7 +37,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.05;        // reel-1: balanced, medium-high contrast
+renderer.toneMappingExposure = 1.18;        // lifted: brighter studio → glossier clearcoat read
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -53,6 +53,7 @@ new RGBELoader().load('model/autoshop_01_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   const env = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = env;
+  scene.environmentIntensity = 1.35;          // brighten HDRI reflections so the clearcoat has crisp light to mirror
   hdr.dispose();
 });
 
@@ -96,13 +97,15 @@ function strip(x, z, w, h, intensity) {
   scene.add(l);
   return l;
 }
-strip(0, 1.6, 1.1, 7.0, 8.5);                // long tube running the car's length
-strip(0, -1.6, 1.1, 7.0, 8.5);
-strip(-3.2, 0, 0.9, 4.5, 4.5);              // side accents
-strip(3.2, 0, 0.9, 4.5, 4.5);
+strip(0, 1.6, 1.1, 7.0, 15);                 // long tube running the car's length
+strip(0, -1.6, 1.1, 7.0, 15);                // bright = sharp specular streak on the clearcoat
+strip(-3.2, 0, 0.9, 4.5, 7);                 // side accents
+strip(3.2, 0, 0.9, 4.5, 7);
 
-const rim = new THREE.DirectionalLight(JRV.orange, 1.1);
-rim.position.set(-6, 3.5, -5);               // brand-orange edge separation
+// cool rim for crisp edge separation — the brand orange already lives in the paint,
+// so an orange rim only muddied it and pooled a hot wash on the floor. Raised + cool.
+const rim = new THREE.DirectionalLight(0xdfe9ff, 0.85);
+rim.position.set(-6, 6.5, -5);
 scene.add(rim);
 
 const fill = new THREE.PointLight(JRV.mint, 0.9, 12, 2);
@@ -215,14 +218,17 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
     m.envMapIntensity = 1.3;
 
     if (/paint|coat|body/.test(name)) {
-      // JRV-orange physical clearcoat — low clearcoatRoughness = sharp strip streaks
+      // JRV-orange wet clearcoat. Two-layer car-paint: a saturated base coat
+      // (low metalness so the orange stays vivid, not muddied to charcoal) under a
+      // mirror-sharp clearcoat (clearcoat 1, near-zero roughness) that throws the
+      // bright studio-strip streaks — that hard specular IS the "freshly coated" read.
       o.material = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(JRV.orange),
-        metalness: 0.55,
-        roughness: 0.22,
+        metalness: 0.3,
+        roughness: 0.26,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.03,
-        envMapIntensity: 1.3,
+        clearcoatRoughness: 0.015,
+        envMapIntensity: 1.8,
       });
     } else if (/glass|window/.test(name)) {
       m.transparent = true;
@@ -263,33 +269,37 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
   carRoot.add(car);
 
   // ---- best-effort wheel detection (geometry, not names): meshes whose centre
-  // sits low + out at a footprint corner, clustered into 4 quadrants. If we can't
-  // confidently find 4, we skip spinning rather than risk tearing the model. ----
+  // sits low. This Porsche groups each AXLE as one mesh (Cylinder000 = rear pair,
+  // Cylinder001 = front pair, each ~1.7 wide spanning both wheels), so name-match
+  // the wheel cylinders and cluster them by axle (front/rear) rather than into 4
+  // corners. Spinning each axle group around its own X axis rolls all four wheels.
   car.updateMatrixWorld(true);
-  const halfX = size.x / 2, halfZ = size.z / 2, lowY = size.y * 0.34;
-  const quad = { ff: [], fb: [], bf: [], bb: [] };   // x-sign / z-sign buckets
+  const halfX = size.x / 2, halfZ = size.z / 2;
+  const WHEEL_RE = /cylinder|wheel|tyre|tire|\brim\b|alloy|brake|disc|disk|hub|caliper/i;
+  const wheelMeshes = [];
   car.traverse((o) => {
     if (!o.isMesh) return;
     const b = new THREE.Box3().setFromObject(o);
     const c = b.getCenter(new THREE.Vector3());
-    if (c.y > lowY) return;                            // too high to be a wheel
-    if (Math.abs(c.x) < halfX * 0.45) return;          // too central
-    if (Math.abs(c.z) < halfZ * 0.35) return;
-    const kx = c.x < 0 ? 'f' : 'b';
-    const kz = c.z < 0 ? 'f' : 'b';
-    quad[kx + kz].push({ o, c });
+    const sz = b.getSize(new THREE.Vector3());
+    const named = WHEEL_RE.test(o.name || '');
+    // strict geometric fallback: low + round cross-section (sy≈sz) + not a flat panel
+    const round = sz.y > 0.12 && Math.abs(sz.y - sz.z) < sz.y * 0.5 && sz.x < size.x * 0.95;
+    if (c.y < size.y * 0.45 && (named || round)) wheelMeshes.push({ o, c });
   });
-  const buckets = Object.values(quad).filter((b) => b.length);
-  if (buckets.length === 4) {
-    for (const bucket of buckets) {
-      // wheel centre = average of member centres
-      const wc = bucket.reduce((a, m) => a.add(m.c), new THREE.Vector3()).divideScalar(bucket.length);
-      const pivot = new THREE.Group();
-      pivot.position.copy(carRoot.worldToLocal(wc.clone()));
-      carRoot.add(pivot);
-      for (const m of bucket) pivot.attach(m.o);        // attach() preserves world xform
-      wheels.push(pivot);
-    }
+  // cluster by Z (front axle vs rear axle); spin whatever axle groups we find
+  const carCz = box.getCenter(new THREE.Vector3()).z;
+  const axles = [
+    wheelMeshes.filter((w) => w.c.z >= carCz),
+    wheelMeshes.filter((w) => w.c.z < carCz),
+  ].filter((g) => g.length);
+  for (const group of axles) {
+    const wc = group.reduce((a, m) => a.add(m.c.clone()), new THREE.Vector3()).divideScalar(group.length);
+    const pivot = new THREE.Group();
+    pivot.position.copy(carRoot.worldToLocal(wc.clone()));
+    carRoot.add(pivot);
+    for (const m of group) pivot.attach(m.o);            // attach() preserves world xform
+    wheels.push(pivot);
   }
 
   // smoke origins (car-local): all four wheel footprint corners at ground level,
