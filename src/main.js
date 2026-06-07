@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -21,53 +22,64 @@ const headingEl = document.getElementById('heading');
 const loader = document.getElementById('loader');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-// deterministic pose override for screenshot capture: ?gx=0.6&gy=-0.2
+// deterministic capture overrides for screenshots:
+//   ?still=1        freeze the cinematic on a hero 3/4
+//   ?az=2.1&el=0.9  pin camera azimuth(rad)+elevation, ?dist=5.8 radius
 const params = new URLSearchParams(location.search);
-const gxOverride = params.has('gx') ? parseFloat(params.get('gx')) : null;
-const gyOverride = params.has('gy') ? parseFloat(params.get('gy')) : null;
-const hasOverride = gxOverride !== null || gyOverride !== null;
+const still = params.has('still');
+const azOverride = params.has('az') ? parseFloat(params.get('az')) : null;
+const elOverride = params.has('el') ? parseFloat(params.get('el')) : null;
+const distOverride = params.has('dist') ? parseFloat(params.get('dist')) : null;
+const frozen = still || azOverride !== null;
 
 // ===== renderer (raytracing-quality output pipeline) =====
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
+renderer.toneMappingExposure = 1.05;        // reel-1: balanced, medium-high contrast
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
 const scene = new THREE.Scene();
+RectAreaLightUniformsLib.init();
 
-// ===== IBL environment (carries the reflections / "raytraced" clearcoat look) =====
+// ===== IBL — real auto-shop HDRI carries the garage reflections (reel 1) =====
+// Used for reflections/lighting ONLY; the JRV dotted backdrop stays as background
+// so the brand identity survives while the paint reads a true studio clearcoat.
 const pmrem = new THREE.PMREMGenerator(renderer);
-const envRT = pmrem.fromScene(new RoomEnvironment(), 0.04);
-scene.environment = envRT.texture;
+pmrem.compileEquirectangularShader();
+new RGBELoader().load('model/autoshop_01_2k.hdr', (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  const env = pmrem.fromEquirectangular(hdr).texture;
+  scene.environment = env;
+  hdr.dispose();
+});
 
-// ===== camera — 3/4 front hero framing =====
-const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 100);
-const CAM = { x: 2.7, y: 0.82, z: 5.6 };   // base 3/4 angle, near eye-level
-const LOOK_H = 0.5;
+// ===== camera =====
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 100);
+const LOOK_H = 0.55;                          // aim a touch above the floor (beltline)
+const RIG = { az: 0.9, el: 0.62, dist: 5.7 }; // live azimuth/elevation/radius
+let camScale = 1;
 
 function fitCamera() {
   const aspect = innerWidth / innerHeight;
   camera.aspect = aspect;
   let scale = 1;
-  if (aspect < 1) {
-    // portrait phones: pull the rig back so the whole car stays in frame
-    scale = 1 + (1 - aspect) * 1.15;
-  } else if (aspect < 1.3) {
-    scale = 1 + (1.3 - aspect) * 0.5;
-  }
-  CAM.scale = scale;
+  if (aspect < 1) scale = 1 + (1 - aspect) * 1.15;        // portrait: pull back
+  else if (aspect < 1.3) scale = 1 + (1.3 - aspect) * 0.5;
+  camScale = scale;
   camera.updateProjectionMatrix();
 }
 fitCamera();
 
-// ===== lighting (HDRI does the heavy lifting; these sculpt + brand-tint) =====
-scene.add(new THREE.AmbientLight(0x18233c, 0.35));
+// ===== lighting =====
+// HDRI does the ambient + general reflections; these sculpt + brand-tint, and the
+// RectAreaLight strips throw the signature elongated streaks across the clearcoat.
+scene.add(new THREE.AmbientLight(0x1a2233, 0.25));
 
-const key = new THREE.DirectionalLight(0xffffff, 2.1);
-key.position.set(3, 9.5, 2.5);   // high/overhead → short, grounded cast shadow
+const key = new THREE.DirectionalLight(0xffffff, 1.6);
+key.position.set(3, 9.5, 2.5);               // high/overhead → short grounded shadow
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
 key.shadow.camera.near = 1; key.shadow.camera.far = 24;
@@ -76,43 +88,53 @@ key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
 key.shadow.bias = -0.0004; key.shadow.radius = 4;
 scene.add(key);
 
-const rim = new THREE.DirectionalLight(JRV.orange, 1.5);
-rim.position.set(-6, 3.5, -5);
+// overhead linear strip lights — the studio "tube" reflections on hood/roof/flanks
+function strip(x, z, w, h, intensity) {
+  const l = new THREE.RectAreaLight(0xfdfdff, intensity, w, h);   // ~6000K cool white
+  l.position.set(x, 6.2, z);
+  l.lookAt(x, 0, z);                          // face straight down at the car
+  scene.add(l);
+  return l;
+}
+strip(0, 1.6, 1.1, 7.0, 8.5);                // long tube running the car's length
+strip(0, -1.6, 1.1, 7.0, 8.5);
+strip(-3.2, 0, 0.9, 4.5, 4.5);              // side accents
+strip(3.2, 0, 0.9, 4.5, 4.5);
+
+const rim = new THREE.DirectionalLight(JRV.orange, 1.1);
+rim.position.set(-6, 3.5, -5);               // brand-orange edge separation
 scene.add(rim);
 
-const fill = new THREE.PointLight(JRV.mint, 5, 16, 2);
-fill.position.set(-3.5, 1.6, 4);
+const fill = new THREE.PointLight(JRV.mint, 0.9, 12, 2);
+fill.position.set(-3.8, 2.6, 3.5);           // faint mint kick on the shadow side only
 scene.add(fill);
 
-// soft front fill so the body face reads its orange (not just edge highlights)
-const front = new THREE.DirectionalLight(0xfff1e8, 1.1);
-front.position.set(2, 2, 7);
-scene.add(front);
+// neutral cool fill so the shadow side keeps detail (reel-1 stays neutral, not green)
+const coolFill = new THREE.DirectionalLight(0xcfe0ff, 0.6);
+coolFill.position.set(-4, 3, 5);
+scene.add(coolFill);
 
-// ===== contact-shadow ground =====
+// ===== polished-concrete floor (reel 1: subtle blurred reflections + contact shadow) =====
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(60, 60),
-  new THREE.ShadowMaterial({ opacity: 0.62 })
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.ShadowMaterial({ opacity: 0.55 })
 );
 ground.rotation.x = -Math.PI / 2;
-ground.position.y = 0;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// reflective floor tint so the car doesn't float in a void
-const floorGlow = new THREE.Mesh(
-  new THREE.CircleGeometry(7, 64),
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(9, 96),
   new THREE.MeshStandardMaterial({
-    color: 0x05080f, roughness: 0.55, metalness: 0.3,
-    envMapIntensity: 0.45,
+    color: 0x07090f, roughness: 0.34, metalness: 0.0, envMapIntensity: 0.9,
   })
 );
-floorGlow.rotation.x = -Math.PI / 2;
-floorGlow.position.y = -0.001;
-floorGlow.receiveShadow = true;
-scene.add(floorGlow);
+floor.rotation.x = -Math.PI / 2;
+floor.position.y = -0.002;
+floor.receiveShadow = true;
+scene.add(floor);
 
-// ===== dotted blueprint backdrop (the JRV "dotted lines" motif, shared with ORI) =====
+// ===== dotted blueprint backdrop (JRV motif, shared with ORI) =====
 function makeDotTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
@@ -125,47 +147,36 @@ function makeDotTexture() {
     }
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(20, 20);
+  t.repeat.set(22, 22);
   return t;
 }
-const dotPlane = new THREE.Mesh(
-  new THREE.PlaneGeometry(70, 70),
-  new THREE.MeshBasicMaterial({ map: makeDotTexture(), transparent: true, opacity: 0.42, depthWrite: false })
+// backdrop is a large cylinder so the dotted grid wraps behind the orbiting camera
+const backdrop = new THREE.Mesh(
+  new THREE.CylinderGeometry(26, 26, 30, 64, 1, true),
+  new THREE.MeshBasicMaterial({
+    map: makeDotTexture(), transparent: true, opacity: 0.22,
+    side: THREE.BackSide, depthWrite: false,
+  })
 );
-dotPlane.position.set(0, 4, -9);
-scene.add(dotPlane);
-
-// concentric dashed construction rings behind the car
-const rings = new THREE.Group();
-rings.position.set(0, 1.0, -5.5);
-for (let i = 0; i < 3; i++) {
-  const r = 2.2 + i * 1.2;
-  const pts = [];
-  for (let a = 0; a <= 360; a += 4) pts.push(new THREE.Vector3(Math.cos(a * Math.PI / 180) * r, Math.sin(a * Math.PI / 180) * r, 0));
-  const g = new THREE.BufferGeometry().setFromPoints(pts);
-  const m = new THREE.LineDashedMaterial({ color: JRV.orange, dashSize: 0.14, gapSize: 0.2, transparent: true, opacity: 0.26 });
-  const line = new THREE.Line(g, m);
-  line.computeLineDistances();
-  rings.add(line);
-}
-scene.add(rings);
+backdrop.position.y = 8;
+scene.add(backdrop);
 
 // ===== car =====
-const carRoot = new THREE.Group();   // turntable + steering pivot
+const carRoot = new THREE.Group();           // drift-sway pivot
 scene.add(carRoot);
-const BASE_YAW = -0.5;                // resting 3/4 angle
+const BASE_YAW = -0.45;                       // resting 3/4 hero angle
 const lampMats = [];
-let innerCar = null;
+const wheels = [];                            // {pivot} groups spun each frame
+let rearEmit = [];                            // car-local wheel smoke origins
 
-// tight radial "blob" contact shadow that always hugs the wheels (parented to
-// the car so it tracks heading) — kills the floating look the cast shadow can't.
+// tight radial blob contact shadow that hugs the wheels (tracks heading)
 function makeBlobTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 256;
   const ctx = c.getContext('2d');
   const g = ctx.createRadialGradient(128, 128, 8, 128, 128, 124);
   g.addColorStop(0, 'rgba(0,0,0,0.85)');
-  g.addColorStop(0.55, 'rgba(0,0,0,0.45)');
+  g.addColorStop(0.55, 'rgba(0,0,0,0.42)');
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 256, 256);
@@ -182,16 +193,15 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
   const car = gltf.scene;
   car.updateMatrixWorld(true);
 
-  // ---- strip the model's baked studio environment (backdrop dish + flat
-  // shadow plane). Leaving them in floats the car and skews auto-scaling. ----
+  // ---- strip the model's baked studio backdrop dish + flat shadow plane ----
   const junk = [];
   car.traverse((o) => {
     if (!o.isMesh) return;
     const b = new THREE.Box3().setFromObject(o);
     const s = b.getSize(new THREE.Vector3());
-    const flatGround = s.y < 0.05 && Math.max(s.x, s.z) > 2;       // baked shadow plane
-    const backdrop = /plane\d|backdrop|studio|ground|floor/i.test(o.name || '');
-    if (flatGround || backdrop) junk.push(o);
+    const flatGround = s.y < 0.05 && Math.max(s.x, s.z) > 2;
+    const backdropMesh = /backdrop|studio|cyclo|ground|floor/i.test(o.name || '');
+    if (flatGround || backdropMesh) junk.push(o);
   });
   junk.forEach((o) => o.removeFromParent());
 
@@ -202,21 +212,21 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
     const m = o.material;
     if (!m) return;
     const name = (m.name || '').toLowerCase();
-    m.envMapIntensity = 1.5;
+    m.envMapIntensity = 1.3;
 
     if (/paint|coat|body/.test(name)) {
-      // upgrade the body to a physical clearcoat carpaint in JRV orange
+      // JRV-orange physical clearcoat — low clearcoatRoughness = sharp strip streaks
       o.material = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(JRV.orange),
-        metalness: 0.5,
-        roughness: 0.4,
+        metalness: 0.55,
+        roughness: 0.22,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.08,
-        envMapIntensity: 1.5,
+        clearcoatRoughness: 0.03,
+        envMapIntensity: 1.3,
       });
     } else if (/glass|window/.test(name)) {
       m.transparent = true;
-      m.opacity = 0.34;
+      m.opacity = 0.32;
       m.roughness = 0.04;
       m.metalness = 0.0;
       m.envMapIntensity = 2.2;
@@ -229,111 +239,262 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
     } else if (/rubber|tire|tyre/.test(name)) {
       m.roughness = 0.92;
       m.metalness = 0.0;
-    } else if (/silver|chrome|coat/.test(name)) {
+    } else if (/silver|chrome|rim|alloy/.test(name)) {
       m.metalness = 1.0;
-      m.roughness = 0.18;
+      m.roughness = 0.16;
       m.envMapIntensity = 1.9;
     }
   });
 
-  // center on origin, scale to a target length, drop onto the ground (y=0)
+  // center on origin, scale to a target length, drop wheels onto the floor (y=0)
   let box = new THREE.Box3().setFromObject(car);
-  const size = box.getSize(new THREE.Vector3());
+  let size = box.getSize(new THREE.Vector3());
   const longest = Math.max(size.x, size.z);
   const targetLen = 4.4;
   car.scale.setScalar(targetLen / longest);
 
   box = new THREE.Box3().setFromObject(car);
+  size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   car.position.x -= center.x;
   car.position.z -= center.z;
-  car.position.y -= box.min.y;          // wheels sit on the floor
+  car.position.y -= box.min.y;
 
-  // blob contact shadow sized to the car footprint, parented so it tracks heading
-  const fp = box.getSize(new THREE.Vector3());
+  carRoot.add(car);
+
+  // ---- best-effort wheel detection (geometry, not names): meshes whose centre
+  // sits low + out at a footprint corner, clustered into 4 quadrants. If we can't
+  // confidently find 4, we skip spinning rather than risk tearing the model. ----
+  car.updateMatrixWorld(true);
+  const halfX = size.x / 2, halfZ = size.z / 2, lowY = size.y * 0.34;
+  const quad = { ff: [], fb: [], bf: [], bb: [] };   // x-sign / z-sign buckets
+  car.traverse((o) => {
+    if (!o.isMesh) return;
+    const b = new THREE.Box3().setFromObject(o);
+    const c = b.getCenter(new THREE.Vector3());
+    if (c.y > lowY) return;                            // too high to be a wheel
+    if (Math.abs(c.x) < halfX * 0.45) return;          // too central
+    if (Math.abs(c.z) < halfZ * 0.35) return;
+    const kx = c.x < 0 ? 'f' : 'b';
+    const kz = c.z < 0 ? 'f' : 'b';
+    quad[kx + kz].push({ o, c });
+  });
+  const buckets = Object.values(quad).filter((b) => b.length);
+  if (buckets.length === 4) {
+    for (const bucket of buckets) {
+      // wheel centre = average of member centres
+      const wc = bucket.reduce((a, m) => a.add(m.c), new THREE.Vector3()).divideScalar(bucket.length);
+      const pivot = new THREE.Group();
+      pivot.position.copy(carRoot.worldToLocal(wc.clone()));
+      carRoot.add(pivot);
+      for (const m of bucket) pivot.attach(m.o);        // attach() preserves world xform
+      wheels.push(pivot);
+    }
+  }
+
+  // smoke origins (car-local): all four wheel footprint corners at ground level,
+  // so a hard drift smokes regardless of which Z end the model treats as rear.
+  rearEmit = [
+    new THREE.Vector3(-halfX * 0.62, 0.18, halfZ * 0.55),
+    new THREE.Vector3(halfX * 0.62, 0.18, halfZ * 0.55),
+    new THREE.Vector3(-halfX * 0.62, 0.18, -halfZ * 0.55),
+    new THREE.Vector3(halfX * 0.62, 0.18, -halfZ * 0.55),
+  ];
+
+  // blob contact shadow sized to footprint, parented so it tracks heading
   const blob = new THREE.Mesh(
-    new THREE.PlaneGeometry(fp.x * 1.5, fp.z * 1.25),
-    new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: 0.8, depthWrite: false })
+    new THREE.PlaneGeometry(size.x * 1.6, size.z * 1.3),
+    new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, opacity: 0.82, depthWrite: false })
   );
   blob.rotation.x = -Math.PI / 2;
-  blob.position.y = 0.015;
+  blob.position.y = 0.014;
   carRoot.add(blob);
 
-  innerCar = car;
-  carRoot.add(car);
   loader.classList.add('gone');
 }, undefined, (err) => {
   console.error('GLB load failed', err);
   loader.querySelector('span').innerHTML = 'COULD NOT LOAD <b>911</b>';
 });
 
-// ===== postprocessing (bloom on the headlights / brand rim) =====
+// ===== tire smoke (reel 2 drift drama) — sprite pool emitted from rear wheels =====
+function makeSmokeTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 2, 64, 64, 62);
+  g.addColorStop(0, 'rgba(225,228,235,0.9)');
+  g.addColorStop(0.4, 'rgba(200,205,215,0.5)');
+  g.addColorStop(1, 'rgba(200,205,215,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 128, 128);
+  return new THREE.CanvasTexture(c);
+}
+const smokeTex = makeSmokeTexture();
+const SMOKE_N = 90;
+const smoke = [];
+const smokeGroup = new THREE.Group();
+scene.add(smokeGroup);
+for (let i = 0; i < SMOKE_N; i++) {
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: smokeTex, transparent: true, opacity: 0, depthWrite: false,
+    color: 0xc7ccd6,
+  }));
+  s.visible = false;
+  s.userData = { life: 0, max: 0, vy: 0, vx: 0, vz: 0, spin: 0 };
+  smokeGroup.add(s);
+  smoke.push(s);
+}
+let smokeCursor = 0;
+const _emit = new THREE.Vector3();
+function emitSmoke(localPt, drift) {
+  const s = smoke[smokeCursor];
+  smokeCursor = (smokeCursor + 1) % SMOKE_N;
+  _emit.copy(localPt);
+  carRoot.localToWorld(_emit);
+  s.position.copy(_emit);
+  s.position.x += (Math.random() - 0.5) * 0.3;
+  s.position.z += (Math.random() - 0.5) * 0.3;
+  s.userData.max = 1.1 + Math.random() * 0.8;
+  s.userData.life = s.userData.max;
+  s.userData.vy = 0.35 + Math.random() * 0.4;
+  s.userData.vx = (Math.random() - 0.5) * 0.9 - drift * 0.6;
+  s.userData.vz = (Math.random() - 0.5) * 0.9 + 0.5;
+  s.userData.spin = (Math.random() - 0.5) * 0.6;
+  s.scale.setScalar(0.5 + Math.random() * 0.4);
+  s.material.opacity = 0;
+  s.material.rotation = Math.random() * Math.PI;
+  s.visible = true;
+}
+
+// ===== postprocessing (bloom on headlights / brand rim) =====
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.3, 0.6, 0.9);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.32, 0.6, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-// ===== pointer / tap tracking =====
-const target = { x: 0, y: 0 };   // -1..1
-const cur = { x: 0, y: 0 };
-let lastInput = performance.now();
-
-function setTargetFromEvent(clientX, clientY) {
-  target.x = (clientX / innerWidth) * 2 - 1;
-  target.y = (clientY / innerHeight) * 2 - 1;
-  lastInput = performance.now();
+// ===== pointer parallax (subtle nudge on top of the cinematic) =====
+const ptr = { x: 0, y: 0 }, ptrCur = { x: 0, y: 0 };
+if (!frozen) {
+  const onMove = (cx, cy) => { ptr.x = (cx / innerWidth) * 2 - 1; ptr.y = (cy / innerHeight) * 2 - 1; };
+  addEventListener('pointermove', (e) => onMove(e.clientX, e.clientY));
 }
-if (!hasOverride) {
-  window.addEventListener('pointermove', (e) => setTargetFromEvent(e.clientX, e.clientY));
-  window.addEventListener('pointerdown', (e) => setTargetFromEvent(e.clientX, e.clientY));
-} else {
-  target.x = gxOverride ?? 0; target.y = gyOverride ?? 0; cur.x = target.x; cur.y = target.y;
+
+// ===== cinematic camera timeline (reel 2: smooth orbits + whip-pan snaps) =====
+// each leg tweens az/el/dist from the previous keyframe over `dur` with `ease`.
+const TAU = Math.PI * 2;
+const easeInOutCubic = (t) => t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+const easeOutExpo = (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
+const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
+// az: 0=front, +ve swings clockwise. Mix long smooth orbits with fast snaps.
+const TIMELINE = [
+  { az: 0.85, el: 0.60, dist: 5.7, dur: 3.4, ease: easeInOutSine },  // front-right → settle
+  { az: 1.95, el: 0.50, dist: 5.5, dur: 3.2, ease: easeInOutSine },  // orbit to right side
+  { az: 3.55, el: 0.78, dist: 5.9, dur: 0.55, ease: easeOutExpo },   // SNAP to rear-left
+  { az: 4.55, el: 0.55, dist: 5.6, dur: 3.0, ease: easeInOutCubic }, // orbit rear→rear-right
+  { az: 6.10, el: 0.92, dist: 6.1, dur: 0.5, ease: easeOutExpo },    // SNAP toward front (hi)
+  { az: 6.28 + 0.85, el: 0.60, dist: 5.7, dur: 3.0, ease: easeInOutSine }, // glide back to start (≡ leg 0)
+];
+let legIdx = 0, legT = 0;
+let prevKey = { az: TIMELINE[0].az, el: TIMELINE[0].el, dist: TIMELINE[0].dist };
+
+function advanceCinematic(dt) {
+  const leg = TIMELINE[legIdx];
+  legT += dt / leg.dur;
+  let k = Math.min(legT, 1);
+  const e = leg.ease(k);
+  RIG.az = prevKey.az + (leg.az - prevKey.az) * e;
+  RIG.el = prevKey.el + (leg.el - prevKey.el) * e;
+  RIG.dist = prevKey.dist + (leg.dist - prevKey.dist) * e;
+  if (legT >= 1) {
+    legT = 0;
+    prevKey = { az: leg.az % TAU, el: leg.el, dist: leg.dist };
+    legIdx = (legIdx + 1) % TIMELINE.length;
+    // keep prevKey.az continuous with the next leg's frame of reference
+    if (legIdx === 0) prevKey.az = TIMELINE[TIMELINE.length - 1].az % TAU;
+  }
+}
+
+const _camPos = new THREE.Vector3();
+function applyCam() {
+  const s = camScale;
+  const az = RIG.az + ptrCur.x * 0.18;          // pointer nudges azimuth a touch
+  const el = Math.max(0.2, RIG.el - ptrCur.y * 0.25);
+  const d = RIG.dist * s;
+  _camPos.set(Math.sin(az) * d, el * s + 0.35, Math.cos(az) * d);
+  camera.position.copy(_camPos);
+  camera.lookAt(0, LOOK_H, 0);
 }
 
 // ===== loop =====
 const clock = new THREE.Clock();
-let idleSpin = 0;
-
-function applyCam() {
-  const s = CAM.scale || 1;
-  camera.position.set(
-    (CAM.x + cur.x * 0.7) * s,
-    (CAM.y - cur.y * 0.5) * s,
-    CAM.z * s
-  );
-  camera.lookAt(0, LOOK_H, 0);
-}
+let driftPhase = 0;
 
 function animate() {
   requestAnimationFrame(animate);
-  const t = clock.getElapsedTime();
+  const dt = Math.min(clock.getDelta(), 0.05);
+  const t = clock.elapsedTime;
 
-  const idle = !hasOverride && !reduceMotion && performance.now() - lastInput > 2600;
-  if (idle) idleSpin += 0.0026;   // slow continuous turntable when left alone
+  // pointer easing
+  ptrCur.x += (ptr.x - ptrCur.x) * 0.06;
+  ptrCur.y += (ptr.y - ptrCur.y) * 0.06;
 
-  const k = reduceMotion ? 1 : 0.07;
-  cur.x += (target.x - cur.x) * k;
-  cur.y += (target.y - cur.y) * k;
-
-  // car turns to meet the cursor (yaw), with a subtle bank + nose tip
-  carRoot.rotation.y = BASE_YAW + cur.x * 1.0 + idleSpin;
-  carRoot.rotation.z = -cur.x * 0.018;
-  carRoot.rotation.x = cur.y * 0.022;
-  // (car stays planted on the floor — no float, so the contact shadow reads true)
-
-  // camera parallax
+  // ---- camera ----
+  if (frozen) {
+    RIG.az = azOverride ?? 0.85;
+    RIG.el = elOverride ?? 0.6;
+    RIG.dist = distOverride ?? 5.7;
+  } else if (!reduceMotion) {
+    advanceCinematic(dt);
+  } else {
+    RIG.az = 0.85; RIG.el = 0.62; RIG.dist = 5.7;   // static hero
+  }
   applyCam();
 
-  // headlight breathing pulse
+  // ---- car drift-sway (subtle ± yaw so it feels alive while the camera flies) ----
+  let drift = 0;
+  if (!frozen && !reduceMotion) {
+    driftPhase += dt;
+    drift = Math.sin(driftPhase * 0.9) * 0.14 + Math.sin(driftPhase * 2.3) * 0.04;
+  }
+  carRoot.rotation.y = BASE_YAW + drift;
+  carRoot.rotation.z = -drift * 0.05;
+
+  // ---- wheels spin (rolling) ----
+  if (!reduceMotion && !frozen) {
+    const ws = 9.0;
+    for (const w of wheels) w.rotation.x += ws * dt;
+  }
+
+  // ---- tire smoke from rear wheels, scaled by drift intensity ----
+  if (!reduceMotion && !frozen && rearEmit.length) {
+    const intensity = 0.5 + Math.abs(Math.sin(driftPhase * 0.9)) * 1.0;
+    const rate = intensity * 3.2;               // particles this frame (fractional)
+    if (Math.random() < rate * dt * 12) {
+      emitSmoke(rearEmit[Math.random() < 0.5 ? 0 : 1], drift);
+    }
+  }
+  for (const s of smoke) {
+    if (!s.visible) continue;
+    const u = s.userData;
+    u.life -= dt;
+    if (u.life <= 0) { s.visible = false; s.material.opacity = 0; continue; }
+    s.position.x += u.vx * dt;
+    s.position.y += u.vy * dt;
+    s.position.z += u.vz * dt;
+    u.vy *= 0.985;
+    const age = 1 - u.life / u.max;             // 0→1
+    s.scale.setScalar((0.5 + age * 2.4));
+    s.material.opacity = Math.sin(Math.min(age, 1) * Math.PI) * 0.34;  // fade in/out
+    s.material.rotation += u.spin * dt;
+  }
+
+  // ---- headlight breathing pulse ----
   const pulse = reduceMotion ? 1.6 : 1.5 + Math.sin(t * 2.2) * 0.5;
   for (const m of lampMats) m.emissiveIntensity = pulse;
 
-  rings.rotation.z = reduceMotion ? 0 : t * 0.03;
-
-  // HUD: heading in degrees, wrapped 0–359
-  let deg = ((carRoot.rotation.y * 180 / Math.PI) % 360 + 360) % 360;
-  headingEl.textContent = `${String(Math.round(deg)).padStart(3, '0')}°`;
+  // ---- HUD: camera heading around the car, wrapped 0–359 ----
+  let deg = ((RIG.az * 180 / Math.PI) % 360 + 360) % 360;
+  if (headingEl) headingEl.textContent = `${String(Math.round(deg)).padStart(3, '0')}°`;
 
   composer.render();
 }
