@@ -37,7 +37,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true 
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.18;        // lifted: brighter studio → glossier clearcoat read
+renderer.toneMappingExposure = 1.05;        // controlled: wet clearcoat reads deeper with sharp, not blown, highlights
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -74,48 +74,42 @@ function fitCamera() {
 }
 fitCamera();
 
-// ===== lighting =====
-// HDRI does the ambient + general reflections; these sculpt + brand-tint, and the
-// RectAreaLight strips throw the signature elongated streaks across the clearcoat.
-scene.add(new THREE.AmbientLight(0x1a2233, 0.25));
+// ===== lighting (overcast-studio: soft + even, matches the wet-reveal reference) =====
+// The reference render is lit by a diffuse overcast sky, NOT hard studio tubes —
+// so the HDRI carries the ambient + reflections, and we add just ONE soft overhead
+// area light for a clean roof/hood highlight plus a gentle fill. The previous four
+// bright RectArea strips were what made the lighting read "weird" (clashing streaks).
+scene.add(new THREE.AmbientLight(0x222b3a, 0.3));       // soft overcast base, kept low so the scene stays moody (car pops)
 
-const key = new THREE.DirectionalLight(0xffffff, 1.6);
-key.position.set(3, 9.5, 2.5);               // high/overhead → short grounded shadow
+// soft overhead key — high + broad so the shadow is short and feathered, not hard
+const key = new THREE.DirectionalLight(0xfbfdff, 1.05);
+key.position.set(2.5, 10, 3);
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.near = 1; key.shadow.camera.far = 24;
+key.shadow.camera.near = 1; key.shadow.camera.far = 26;
 key.shadow.camera.left = -6; key.shadow.camera.right = 6;
 key.shadow.camera.top = 6; key.shadow.camera.bottom = -6;
-key.shadow.bias = -0.0004; key.shadow.radius = 4;
+key.shadow.bias = -0.0004; key.shadow.radius = 7;        // softer penumbra
 scene.add(key);
 
-// overhead linear strip lights — the studio "tube" reflections on hood/roof/flanks
-function strip(x, z, w, h, intensity) {
-  const l = new THREE.RectAreaLight(0xfdfdff, intensity, w, h);   // ~6000K cool white
-  l.position.set(x, 6.2, z);
-  l.lookAt(x, 0, z);                          // face straight down at the car
-  scene.add(l);
-  return l;
-}
-strip(0, 1.6, 1.1, 7.0, 15);                 // long tube running the car's length
-strip(0, -1.6, 1.1, 7.0, 15);                // bright = sharp specular streak on the clearcoat
-strip(-3.2, 0, 0.9, 4.5, 7);                 // side accents
-strip(3.2, 0, 0.9, 4.5, 7);
+// ONE broad, soft overhead panel — the single clean specular sweep down the roof
+// and hood that says "freshly coated". Wide + lower intensity = a soft band, not a
+// hard tube. This is the only area light, so reflections stay calm and readable.
+const panel = new THREE.RectAreaLight(0xf6f9ff, 5.5, 5.0, 9.0);
+panel.position.set(0, 7.0, 0);
+panel.lookAt(0, 0, 0);
+scene.add(panel);
 
-// cool rim for crisp edge separation — the brand orange already lives in the paint,
-// so an orange rim only muddied it and pooled a hot wash on the floor. Raised + cool.
-const rim = new THREE.DirectionalLight(0xdfe9ff, 0.85);
-rim.position.set(-6, 6.5, -5);
-scene.add(rim);
+// cool sky fill from the front-left so the shadow side keeps detail (overcast bounce)
+const skyFill = new THREE.DirectionalLight(0xd7e4ff, 0.55);
+skyFill.position.set(-5, 4, 5);
+scene.add(skyFill);
 
-const fill = new THREE.PointLight(JRV.mint, 0.9, 12, 2);
-fill.position.set(-3.8, 2.6, 3.5);           // faint mint kick on the shadow side only
-scene.add(fill);
-
-// neutral cool fill so the shadow side keeps detail (reel-1 stays neutral, not green)
-const coolFill = new THREE.DirectionalLight(0xcfe0ff, 0.6);
-coolFill.position.set(-4, 3, 5);
-scene.add(coolFill);
+// whisper of brand mint on the deep shadow side only — kept very low so the orange
+// paint reads true and the scene stays neutral/overcast, not green.
+const mintKick = new THREE.PointLight(JRV.mint, 0.35, 11, 2);
+mintKick.position.set(-4, 2.4, 3.4);
+scene.add(mintKick);
 
 // ===== polished-concrete floor (reel 1: subtle blurred reflections + contact shadow) =====
 const ground = new THREE.Mesh(
@@ -129,7 +123,9 @@ scene.add(ground);
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(9, 96),
   new THREE.MeshStandardMaterial({
-    color: 0x07090f, roughness: 0.34, metalness: 0.0, envMapIntensity: 0.9,
+    // wet-asphalt read: near-black + low roughness so it mirrors the car & sky like
+    // a rain-soaked surface (the reference grounds the car on glossy wet tarmac).
+    color: 0x05070b, roughness: 0.14, metalness: 0.2, envMapIntensity: 1.25,
   })
 );
 floor.rotation.x = -Math.PI / 2;
@@ -187,6 +183,58 @@ function makeBlobTexture() {
 }
 const blobTex = makeBlobTexture();
 
+// ===== procedural water-droplet clearcoat normal map (the "freshly coated / wet" read) =====
+// The reference render's premium signature is beaded water on a mirror clearcoat. We
+// fake it the way studios do for real-time: a normal map of scattered domed droplets
+// applied to the CLEARCOAT layer only — so the base orange stays smooth and vivid, but
+// the clear lacquer on top sparkles with thousands of tiny refracting highlights.
+function makeDropletNormalMap(size = 1024, count = 900) {
+  // 1) build a height field of smooth domed droplets
+  const h = new Float32Array(size * size);
+  let seed = 1337;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let i = 0; i < count; i++) {
+    const cx = rnd() * size, cy = rnd() * size;
+    const r = 4 + rnd() * 16;              // droplet radius in px
+    const amp = 0.5 + rnd() * 0.5;
+    const r2 = r * r;
+    const x0 = Math.max(0, (cx - r) | 0), x1 = Math.min(size - 1, (cx + r) | 0);
+    const y0 = Math.max(0, (cy - r) | 0), y1 = Math.min(size - 1, (cy + r) | 0);
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const dx = x - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+      if (d2 > r2) continue;
+      const dome = Math.sqrt(1 - d2 / r2);   // hemispherical dome profile
+      const v = dome * amp;
+      if (v > h[y * size + x]) h[y * size + x] = v;  // droplets sit on top, not add
+    }
+  }
+  // 2) derive a normal map from the height field (central differences)
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(size, size);
+  const strength = 2.2;
+  const at = (x, y) => h[((y + size) % size) * size + ((x + size) % size)];
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const nx = (at(x - 1, y) - at(x + 1, y)) * strength;
+    const ny = (at(x, y - 1) - at(x, y + 1)) * strength;
+    const nz = 1.0;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    const o = (y * size + x) * 4;
+    img.data[o]     = ((nx / len) * 0.5 + 0.5) * 255;
+    img.data[o + 1] = ((ny / len) * 0.5 + 0.5) * 255;
+    img.data[o + 2] = ((nz / len) * 0.5 + 0.5) * 255;
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(3, 3);
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
+}
+const dropletNormal = makeDropletNormalMap();
+
 const draco = new DRACOLoader();
 draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 const gltfLoader = new GLTFLoader();
@@ -218,17 +266,19 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
     m.envMapIntensity = 1.3;
 
     if (/paint|coat|body/.test(name)) {
-      // JRV-orange wet clearcoat. Two-layer car-paint: a saturated base coat
-      // (low metalness so the orange stays vivid, not muddied to charcoal) under a
-      // mirror-sharp clearcoat (clearcoat 1, near-zero roughness) that throws the
-      // bright studio-strip streaks — that hard specular IS the "freshly coated" read.
+      // JRV-orange WET clearcoat, matching the reference reveal. A saturated base
+      // coat (low-ish metalness so the orange stays vivid) under a mirror clearcoat
+      // carrying a droplet normal map — thousands of tiny beaded highlights that read
+      // as "freshly washed / just coated". That beading IS the premium signature.
       o.material = new THREE.MeshPhysicalMaterial({
         color: new THREE.Color(JRV.orange),
-        metalness: 0.3,
-        roughness: 0.26,
+        metalness: 0.35,
+        roughness: 0.28,
         clearcoat: 1.0,
-        clearcoatRoughness: 0.015,
-        envMapIntensity: 1.8,
+        clearcoatRoughness: 0.03,
+        clearcoatNormalMap: dropletNormal,
+        clearcoatNormalScale: new THREE.Vector2(0.42, 0.42),
+        envMapIntensity: 2.0,
       });
     } else if (/glass|window/.test(name)) {
       m.transparent = true;
@@ -243,12 +293,23 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
       m.toneMapped = false;
       lampMats.push(m);
     } else if (/rubber|tire|tyre/.test(name)) {
-      m.roughness = 0.92;
-      m.metalness = 0.0;
+      // wet tire: dark rubber with a faint clearcoat sheen + droplet beading (the
+      // reference tires glisten too). Upgrade to physical so the wet layer reads.
+      o.material = new THREE.MeshPhysicalMaterial({
+        color: new THREE.Color(0x0a0b0d),
+        roughness: 0.62, metalness: 0.0,
+        clearcoat: 0.6, clearcoatRoughness: 0.35,
+        clearcoatNormalMap: dropletNormal,
+        clearcoatNormalScale: new THREE.Vector2(0.5, 0.5),
+        envMapIntensity: 1.0,
+      });
     } else if (/silver|chrome|rim|alloy/.test(name)) {
+      // matte graphite-black machined alloy (reference runs black wheels), still
+      // metallic enough to catch a crisp edge of the overhead panel.
+      m.color = new THREE.Color(0x14161a);
       m.metalness = 1.0;
-      m.roughness = 0.16;
-      m.envMapIntensity = 1.9;
+      m.roughness = 0.34;
+      m.envMapIntensity = 1.6;
     }
   });
 
@@ -268,39 +329,44 @@ gltfLoader.load('model/porsche.glb', (gltf) => {
 
   carRoot.add(car);
 
-  // ---- best-effort wheel detection (geometry, not names): meshes whose centre
-  // sits low. This Porsche groups each AXLE as one mesh (Cylinder000 = rear pair,
-  // Cylinder001 = front pair, each ~1.7 wide spanning both wheels), so name-match
-  // the wheel cylinders and cluster them by axle (front/rear) rather than into 4
-  // corners. Spinning each axle group around its own X axis rolls all four wheels.
+  // ---- wheel spin (grounded in the real GLB structure) ----
+  // Verified from the GLB: each AXLE is ONE node group spanning BOTH wheels —
+  // `Cylinder.000*` (meshes 8-11) and `Cylinder.001*` (29-32), split only by
+  // material (silver rim / rubber tire / disc). A rolling wheel rotates around the
+  // car's WIDTH axis (the axle), so we spin each axle group around that axis — NOT
+  // a hardcoded X (the earlier bug: car length runs along X here, so spinning X
+  // rolled the wheels around their length and looked dead).
   car.updateMatrixWorld(true);
   const halfX = size.x / 2, halfZ = size.z / 2;
-  const WHEEL_RE = /cylinder|wheel|tyre|tire|\brim\b|alloy|brake|disc|disk|hub|caliper/i;
-  const wheelMeshes = [];
+  const lengthAxis = size.x >= size.z ? 'x' : 'z';       // car points down its longest dim
+  const spinAxis = lengthAxis === 'x' ? 'z' : 'x';       // wheels roll around the perpendicular (width) axis
+
+  const axleGroups = new Map();                          // "Cylinder000" -> [meshes]
   car.traverse((o) => {
     if (!o.isMesh) return;
-    const b = new THREE.Box3().setFromObject(o);
-    const c = b.getCenter(new THREE.Vector3());
-    const sz = b.getSize(new THREE.Vector3());
-    const named = WHEEL_RE.test(o.name || '');
-    // strict geometric fallback: low + round cross-section (sy≈sz) + not a flat panel
-    const round = sz.y > 0.12 && Math.abs(sz.y - sz.z) < sz.y * 0.5 && sz.x < size.x * 0.95;
-    if (c.y < size.y * 0.45 && (named || round)) wheelMeshes.push({ o, c });
+    // NB: three's GLTFLoader strips dots from GLB node names, so "Cylinder.000_0"
+    // arrives as "Cylinder000_0" — match the de-dotted form and key by axle prefix.
+    const mm = /^(Cylinder\d+)_/i.exec(o.name || '');
+    if (mm) {
+      const k = mm[1];
+      if (!axleGroups.has(k)) axleGroups.set(k, []);
+      axleGroups.get(k).push(o);
+    }
   });
-  // cluster by Z (front axle vs rear axle); spin whatever axle groups we find
-  const carCz = box.getCenter(new THREE.Vector3()).z;
-  const axles = [
-    wheelMeshes.filter((w) => w.c.z >= carCz),
-    wheelMeshes.filter((w) => w.c.z < carCz),
-  ].filter((g) => g.length);
-  for (const group of axles) {
-    const wc = group.reduce((a, m) => a.add(m.c.clone()), new THREE.Vector3()).divideScalar(group.length);
+
+  for (const group of axleGroups.values()) {
+    // axle center in world space, from the union bbox of its meshes
+    const wb = new THREE.Box3();
+    for (const m of group) wb.expandByObject(m);
+    const wc = wb.getCenter(new THREE.Vector3());
     const pivot = new THREE.Group();
     pivot.position.copy(carRoot.worldToLocal(wc.clone()));
     carRoot.add(pivot);
-    for (const m of group) pivot.attach(m.o);            // attach() preserves world xform
+    for (const m of group) pivot.attach(m);              // attach() preserves world xform
     wheels.push(pivot);
   }
+  // expose the axis the loop should spin around
+  wheels.spinAxis = spinAxis;
 
   // smoke origins (car-local): all four wheel footprint corners at ground level,
   // so a hard drift smokes regardless of which Z end the model treats as rear.
@@ -469,10 +535,11 @@ function animate() {
   carRoot.rotation.y = BASE_YAW + drift;
   carRoot.rotation.z = -drift * 0.05;
 
-  // ---- wheels spin (rolling) ----
-  if (!reduceMotion && !frozen) {
+  // ---- wheels spin (rolling around the axle/width axis) ----
+  if (!reduceMotion && !frozen && wheels.length) {
     const ws = 9.0;
-    for (const w of wheels) w.rotation.x += ws * dt;
+    const axis = wheels.spinAxis || 'x';
+    for (const w of wheels) w.rotation[axis] += ws * dt;
   }
 
   // ---- tire smoke from rear wheels, scaled by drift intensity ----
