@@ -57,9 +57,9 @@ linear speed**, so the rims roll instead of sliding.
 |-------|--------|
 | 3D engine | **Three.js** `^0.171` (vanilla, ES modules) |
 | Build | **Vite** `^5` |
-| Rendering | WebGL, `NeutralToneMapping` (Khronos PBR Neutral, exposure 1.06 — keeps the candy orange saturated where ACES washed it out) + `SRGBColorSpace`, `PCFSoftShadowMap` |
-| Lighting | **IBL** via **Poly Haven `belfast_sunset_puresky` HDRI** (`RGBELoader` → `PMREMGenerator`) — twilight reflections; low warm raking **sun** key (shadow caster) + deep-blue twilight fill + cold back rim + warm camera-side fill (gloss on the near flank) + one JRV-orange accent kiss |
-| Environment | HDRI as **softened dusk backdrop** (`backgroundBlurriness 0.14` so the bright horizon doesn't blow out, `backgroundIntensity 0.6`, `environmentIntensity 1.3` carries the gloss) + cool `FogExp2(#161c28, 0.02)` dusk haze |
+| Rendering | WebGL, `NeutralToneMapping` (Khronos PBR Neutral, exposure 0.94 — keeps the candy orange saturated where ACES washed it out, dialed back from 1.06 so the body no longer clips to white) + `SRGBColorSpace`, `PCFSoftShadowMap` |
+| Lighting | **IBL** via **Poly Haven `belfast_sunset_puresky` HDRI** (`RGBELoader` → `PMREMGenerator`) — twilight reflections; low warm raking **sun** key 1.7 (shadow caster) + deep-blue twilight fill 0.55 + cold back rim 0.8 + warm camera-side fill 0.65 (gloss on the near flank) + one JRV-orange accent kiss 0.5. Intensities pulled down across the board so the car reads glossy, not over-lit |
+| Environment | HDRI as **softened dusk backdrop** (`backgroundBlurriness 0.14` so the bright horizon doesn't blow out, `backgroundIntensity 0.6`, `environmentIntensity 1.0` carries the gloss without over-lighting) + cool `FogExp2(#161c28, 0.02)` dusk haze |
 | Track | kerbed tarmac `CanvasTexture` (asphalt speckle + worn racing line + red/white kerbs + limit lines), `RepeatWrapping` scrolled via `offset.y` |
 | Body material | `MeshPhysicalMaterial` candy-metallic — candy-orange base `#ff5a1c`, `metalness 0.85`, `roughness 0.30`, `clearcoat 1`, `clearcoatRoughness 0.03`, `envMapIntensity 3.0` (dusk sky reflects hard → wet candy gloss, reads orange not crimson under the grade) |
 | Reveal | state machine `load → detail → pull → drift`; real PBR from frame 0 (the rim study needs detail); `easeOutCubic` counter; white flash on snap |
@@ -71,7 +71,7 @@ linear speed**, so the rims roll instead of sliding.
 | Camera | drift tracking weave (az/el/dist, leans into `steerCur`) + **pointer-event drag-orbit** with polar clamp (`0.18 … 1.46` rad) |
 | Geometry | Sketchfab GLB → `gltf-transform optimize` (Draco geometry + WebP textures) → **2.7 MB** |
 | Loading | `GLTFLoader` + `DRACOLoader` (gstatic decoder) |
-| Post | **Most-Wanted cinematic chain:** `EffectComposer` → `UnrealBloomPass` (0.34 / 0.5 / 0.9) → `OutputPass` (tonemap+sRGB) → **`CinematicShader` `ShaderPass`** — radial speed-blur + chromatic aberration (both scale with `uSpeed` + `uThrottle`), teal-shadow / orange-highlight grade, vignette, film grain. Plus a speed-rush **FOV punch** on throttle |
+| Post | **Most-Wanted cinematic chain:** `EffectComposer` → `UnrealBloomPass` (0.18 / 0.5 / 0.95 — softened so headlights glow without flaring) → `OutputPass` (tonemap+sRGB) → **`CinematicShader` `ShaderPass`** — radial speed-blur + chromatic aberration (both scale with `uSpeed` + `uThrottle`) **masked to the frame edges** (`smoothstep 0.34→0.66` keeps a sharp central hero zone, so the car stays crisp and only the rushing track smears), teal-shadow / orange-highlight grade, vignette, film grain. Plus a speed-rush **FOV punch** on throttle |
 | Grounding | sun cast shadow (`ShadowMaterial`) + **`Reflector` wet-tarmac mirror apron** (three.js addon, dimmed reflection under a translucent asphalt sheet → car/sky mirror in the ground) + a radial **blob contact shadow** parented to the car |
 | Host | Vercel (static `dist/`) |
 
