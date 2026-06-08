@@ -5,15 +5,21 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 
 // --- JRV brand palette ---
 const JRV = {
   orange: 0xF15828,
   mint: 0x00FF88,
 };
+
+// Hero paint colour — single flip-point. Nardo-style cool grey to match the reel's
+// widebody; set to 0xff5a1c (candy orange) to revert to the previous look.
+const CAR_PAINT = 0x5c646a;
 
 const canvas = document.getElementById('scene');
 const headingEl = document.getElementById('heading');
@@ -44,11 +50,11 @@ const easeOutExpo = (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-// PBR Neutral (Khronos) instead of ACES Filmic — ACES desaturates highlights and
-// was the main reason the orange read "faded"/chalky under the bright clear sky.
-// Neutral holds the candy saturation while still rolling off the sky highlights.
+// PBR Neutral (Khronos) instead of ACES Filmic — ACES crushes/desaturates and the
+// reel is a CLEAN bright-daylight grade. Neutral rolls the hot sky highlights off
+// gently while holding the cool metallic grey of the paint (the cinematic-render look).
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 0.94;
+renderer.toneMappingExposure = 0.96;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -67,32 +73,37 @@ const DETAIL_DUR = 3.8;
 let pullT = 0;
 const PULL_DUR = 2.8;
 
-// ===== IBL — TWILIGHT PURE-SKY HDRI (dusk racetrack / Most-Wanted dusk grade) =====
-// Cool blue dome with a warm low sun on the horizon → teal-shadow / orange-highlight
-// split that reads cinematic AND keeps the orange car popping (an orange sky would
-// have gone muddy on an already-orange body).
+// ===== IBL — CLEAR DAYTIME PURE-SKY HDRI (the reel's bright hazy daylight grade) =====
+// Light-blue midday dome with a high sun → bright open-lot drift look. The sky carries
+// soft cool reflections in the grey paint; atmospheric haze (fog) softens + desaturates
+// the distance exactly like the reel's hazed-out skyline.
 const pmrem = new THREE.PMREMGenerator(renderer);
 pmrem.compileEquirectangularShader();
 let skyEnv = null;
 let skyEquirect = null;
-new RGBELoader().load('model/belfast_sunset_puresky_2k.hdr', (hdr) => {
+new RGBELoader().load('model/kloofendal_43d_clear_puresky_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   skyEquirect = hdr;
   skyEnv = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = skyEnv;
-  scene.environmentIntensity = 0.95;
+  scene.environmentIntensity = 1.0;
   if (revealed) applySkyBackground();
 });
 
-scene.background = new THREE.Color(0x0d1119);   // deep dusk-blue behind the rim study
+scene.background = new THREE.Color(0xb9c6d2);   // pale hazy daylight behind the rim study
+
+// HAZE — a light blue-grey atmospheric fog is THE defining environmental cue of the
+// reel: it diffuses + desaturates everything past the car, fades the kerbs out, and
+// blends the ground into the sky at the horizon. Kept module-level so it can be tuned.
+const HAZE_COLOR = 0xc3cfd9;
 
 function applySkyBackground() {
   if (!skyEquirect) return;
-  scene.environmentIntensity = 1.0;             // sky carries the gloss reflections (bg dimmed separately)
+  scene.environmentIntensity = 1.0;             // sky carries the soft daylight reflections
   scene.background = skyEquirect;
-  scene.backgroundBlurriness = 0.14;            // softer dusk dome → bright horizon doesn't blow out
-  scene.backgroundIntensity = 0.6;
-  scene.fog = new THREE.FogExp2(0x161c28, 0.02);   // cool dusk haze rolling down the track
+  scene.backgroundBlurriness = 0.18;            // hazy dome → soft, diffused horizon (not crisp)
+  scene.backgroundIntensity = 0.72;             // bright daylight sky (not blown to white)
+  scene.fog = new THREE.FogExp2(HAZE_COLOR, 0.016);   // SUBTLE haze — softens distance only, keeps the car/ground clean
 }
 
 // the SNAP: rim study → real PBR + sky bg + the car comes alive
@@ -125,48 +136,60 @@ function fitCamera() {
 }
 fitCamera();
 
-// ===== lighting — DUSK: a low warm raking sun, deep-blue twilight fill =====
-scene.add(new THREE.AmbientLight(0x33415c, 0.30));   // cool dusk ambient (teal shadows)
+// ===== lighting — BRIGHT MIDDAY: a high near-white sun + strong cool sky ambient =====
+// High ambient from the open sky LIFTS the shadows (the reel's shadows hold detail and
+// carry a faint cool tint, never crushed to black).
+scene.add(new THREE.AmbientLight(0xbcccdc, 0.62));   // cool open-sky ambient, shadows stay open
 
-// the SUN — low, warm, raking. Long dramatic shadow + a hot orange clearcoat streak
-// down the flank (the Most-Wanted golden-hour kiss).
-const key = new THREE.DirectionalLight(0xffd9b4, 1.7);
-key.position.set(7, 6, 5);                          // lower than midday → longer rake
+// the SUN — high, bright, barely-warm white (midday). Crisp shadow, hot specular kick
+// that the bloom turns into the reel's sun glints.
+const key = new THREE.DirectionalLight(0xfff6ec, 3.1);
+key.position.set(6, 11, 4);                         // HIGH → short midday shadow
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.near = 1; key.shadow.camera.far = 40;
+key.shadow.camera.near = 1; key.shadow.camera.far = 50;
 key.shadow.camera.left = -8; key.shadow.camera.right = 8;
 key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
-key.shadow.bias = -0.0004; key.shadow.radius = 6;
+key.shadow.bias = -0.0004; key.shadow.radius = 5;
 scene.add(key);
 
-// deep-blue twilight fill — cool bounce from the opposite sky (carves the teal shadow side)
-const skyFill = new THREE.DirectionalLight(0x5874a8, 0.55);
-skyFill.position.set(-6, 5, -3);
+// SUN LENS-FLARE — the reel's signature daytime artifact. A bright core + a few coloured
+// ghosts ride the line from the sun through frame centre, appearing when the sun swings
+// into view during the orbit. Parented to a far point in the sun's direction.
+const sunAnchor = new THREE.Object3D();
+sunAnchor.position.copy(key.position).normalize().multiplyScalar(70);
+scene.add(sunAnchor);
+const flareGlow = makeFlareTexture(0xffffff, 0.0);
+const flareGhost = makeFlareTexture(0xbfe0ff, 0.55);
+const lensflare = new Lensflare();
+lensflare.addElement(new LensflareElement(flareGlow, 480, 0, new THREE.Color(0xfff4e6)));
+lensflare.addElement(new LensflareElement(flareGhost, 60, 0.35));
+lensflare.addElement(new LensflareElement(flareGhost, 90, 0.5));
+lensflare.addElement(new LensflareElement(flareGhost, 140, 0.7));
+lensflare.addElement(new LensflareElement(flareGhost, 70, 0.9));
+sunAnchor.add(lensflare);
+
+// strong cool sky fill — bounced daylight from the opposite dome, carves the shadow
+// side without warming it (keeps the whole car in the cool grey family).
+const skyFill = new THREE.DirectionalLight(0xc4d4e6, 1.05);
+skyFill.position.set(-6, 6, -3);
 scene.add(skyFill);
 
-// cold rim from behind to carve the silhouette against the dusk
-const rim = new THREE.DirectionalLight(0xbcd0ff, 0.8);
-rim.position.set(-2, 3, -7);
+// cool rim from behind — a clean highlight edge against the hazy sky
+const rim = new THREE.DirectionalLight(0xd8e6ff, 0.7);
+rim.position.set(-2, 4, -7);
 scene.add(rim);
 
-// camera-side fill — at dusk the raking sun lights the FAR flank, so the near
-// (camera) side falls into shadow and the paint reads dark/crimson. This warm fill
-// puts a glossy specular hit back on the visible side without flattening the mood.
-const frontFill = new THREE.DirectionalLight(0xfff0e2, 0.65);
+// camera-side fill — soft, neutral, just lifts the near flank so the grey reads as
+// glossy metal rather than going flat-matte in self-shadow.
+const frontFill = new THREE.DirectionalLight(0xeef3f8, 0.55);
 frontFill.position.set(0, 3.5, 8);
 scene.add(frontFill);
-
-// ONE brand accent — a warm JRV-orange kiss along the near flank. Restraint:
-// a single tinted light reads as a signature glint, not a stage-gel disco.
-const accent = new THREE.DirectionalLight(JRV.orange, 0.5);
-accent.position.set(6, 2.2, 3.5);
-scene.add(accent);
 
 // ===== ground (sun-baked tarmac) =====
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(160, 160),
-  new THREE.ShadowMaterial({ opacity: 0.42 })
+  new THREE.ShadowMaterial({ opacity: 0.26 })   // lifted midday shadow — open, not crushed
 );
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
@@ -181,19 +204,19 @@ const apronMirror = new Reflector(new THREE.PlaneGeometry(200, 200), {
   clipBias: 0.003,
   textureWidth: Math.floor(innerWidth * _dpr),
   textureHeight: Math.floor(innerHeight * _dpr),
-  color: 0x333b43,                      // dim the reflection → wet asphalt, not a mirror
+  color: 0x6a727b,                      // brighter daytime bounce, still dimmed (dry-ish lot, not a mirror)
 });
 apronMirror.rotation.x = -Math.PI / 2;
 apronMirror.position.y = -0.012;
 scene.add(apronMirror);
 
-// translucent asphalt sheet over the mirror — lets ~45% of the reflection bleed
-// through for a wet sheen while keeping a dark tarmac body.
+// light-grey concrete sheet over the mirror — daytime open lot. Mostly opaque so only
+// a faint sheen of the reflection bleeds through (dry concrete, not wet asphalt).
 const apron = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
   new THREE.MeshStandardMaterial({
-    color: 0x121519, roughness: 0.5, metalness: 0.0,
-    envMapIntensity: 0.7, transparent: true, opacity: 0.55,
+    color: 0x9298a0, roughness: 0.82, metalness: 0.0,
+    envMapIntensity: 0.55, transparent: true, opacity: 0.8,
   })
 );
 apron.rotation.x = -Math.PI / 2;
@@ -214,7 +237,7 @@ const road = new THREE.Mesh(
   new THREE.PlaneGeometry(8.6, ROAD_LEN),
   new THREE.MeshStandardMaterial({
     map: roadTex, color: 0xffffff,
-    roughness: 0.5, metalness: 0.08, envMapIntensity: 0.85,
+    roughness: 0.82, metalness: 0.0, envMapIntensity: 0.5,   // dry daytime concrete
   })
 );
 road.rotation.x = -Math.PI / 2;
@@ -271,15 +294,14 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
       return m;
     }
     if (/carpaint/.test(name)) {
-      // proper candy-metallic automotive paint: a saturated orange metallic-flake
-      // base (high metalness tints the reflection → deep, rich body colour, not the
-      // muddy half-metal it was) under a mirror clearcoat for the wet gloss highlight.
-      // envMap pushed hard so the sky + track actually reflect in the panels.
+      // NARDO GREY metallic — the reel's widebody colour: a cool, desaturated slate
+      // grey with a subtle metallic flake, under a glossy clearcoat that mirrors the
+      // bright hazy sky. (Flip CAR_PAINT back to an orange hex for the candy look.)
       const p = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(0xff5a1c),       // candy orange — survives tonemap + dusk grade without going crimson
-        metalness: 0.85, roughness: 0.30,
-        clearcoat: 1.0, clearcoatRoughness: 0.03,
-        envMapIntensity: 3.0,                   // dusk sky reflects hard → wet candy gloss
+        color: new THREE.Color(CAR_PAINT),      // #5c646a Nardo-style cool grey
+        metalness: 0.72, roughness: 0.34,
+        clearcoat: 1.0, clearcoatRoughness: 0.06,
+        envMapIntensity: 2.1,                   // bright sky reflects in the panels (clean, not blown)
         specularIntensity: 1.0,
         sheen: 0.0,
       });
@@ -432,34 +454,55 @@ function makeBlobTexture() {
   return new THREE.CanvasTexture(c);
 }
 
+// lens-flare sprite — a soft radial glow. tint is applied per-element via LensflareElement,
+// so the texture is white→transparent; `edge` adds a faint ring for the ghost discs.
+function makeFlareTexture(_color, edge) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.25, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.6, `rgba(255,255,255,${0.12 + edge * 0.18})`);
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.beginPath(); x.arc(64, 64, 64, 0, Math.PI * 2); x.fill();
+  if (edge > 0) {                         // faint ring → reads as a lens ghost disc
+    x.strokeStyle = `rgba(255,255,255,${edge * 0.5})`;
+    x.lineWidth = 2;
+    x.beginPath(); x.arc(64, 64, 44, 0, Math.PI * 2); x.stroke();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
 // sun-baked racetrack tarmac: dark asphalt, a rubbered racing line, red/white kerbs
 // down both edges + a thin white limit line. Tiles down its length.
 function makeTrackTexture() {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 1024;
   const ctx = c.getContext('2d');
-  // asphalt base + speckle
-  ctx.fillStyle = '#0c0f12'; ctx.fillRect(0, 0, 256, 1024);
-  for (let i = 0; i < 3000; i++) {
-    const v = 14 + Math.floor(Math.random() * 26);
-    ctx.fillStyle = `rgba(${v},${v + 2},${v + 4},${0.22 + Math.random() * 0.3})`;
+  // light-grey concrete base + speckle (bright open lot, not dark race asphalt)
+  ctx.fillStyle = '#878d94'; ctx.fillRect(0, 0, 256, 1024);
+  for (let i = 0; i < 3200; i++) {
+    const v = 120 + Math.floor(Math.random() * 40);
+    ctx.fillStyle = `rgba(${v},${v + 2},${v + 5},${0.18 + Math.random() * 0.26})`;
     ctx.fillRect(Math.random() * 256, Math.random() * 1024, 1.5, 1.5);
   }
-  // worn rubber racing line down the centre (two faint dark bands = the groove)
-  ctx.fillStyle = 'rgba(0,0,0,0.34)';
+  // worn rubber line down the centre where cars track (two faint dark bands)
+  ctx.fillStyle = 'rgba(40,42,46,0.28)';
   ctx.fillRect(96, 0, 26, 1024);
   ctx.fillRect(134, 0, 26, 1024);
-  // thin white limit lines just inboard of the kerbs
-  ctx.fillStyle = 'rgba(214,220,226,0.55)';
-  ctx.fillRect(34, 0, 4, 1024);
-  ctx.fillRect(218, 0, 4, 1024);
-  // red/white kerbs on both edges (classic curbing — instant racetrack read)
+  // faded painted lot lines near the edges (worn white, not race kerbs)
+  ctx.fillStyle = 'rgba(228,232,236,0.5)';
+  ctx.fillRect(30, 0, 5, 1024);
+  ctx.fillRect(221, 0, 5, 1024);
+  // muted dashed edge markings — neutral industrial-lot read, faded by the haze
   const block = 64;
   for (let y = 0; y < 1024; y += block) {
-    const red = ((y / block) % 2) === 0;
-    ctx.fillStyle = red ? '#c4241b' : '#e9e9ea';
-    ctx.fillRect(6, y, 24, block);       // left kerb
-    ctx.fillRect(226, y, 24, block);     // right kerb
+    const on = ((y / block) % 2) === 0;
+    if (!on) continue;
+    ctx.fillStyle = 'rgba(206,210,214,0.34)';
+    ctx.fillRect(10, y, 14, block * 0.7);     // left dashes
+    ctx.fillRect(232, y, 14, block * 0.7);    // right dashes
   }
   return new THREE.CanvasTexture(c);
 }
@@ -497,7 +540,7 @@ const smokeSprites = [];
 const smokeState = [];
 for (let i = 0; i < SMOKE_N; i++) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: smokeTex, transparent: true, depthWrite: false, opacity: 0, color: 0x6b7079,
+    map: smokeTex, transparent: true, depthWrite: false, opacity: 0, color: 0xdce1e7,
   }));
   s.scale.set(0.001, 0.001, 1);
   s.visible = false;
@@ -515,9 +558,9 @@ function emitSmoke(px, py, pz, back, lateral) {
   st.vx = back.x * (1.9 + Math.random() * 1.4) + lateral.x * (0.7 + Math.random() * 1.0) + (Math.random() - 0.5) * 0.4;
   st.vz = back.z * (1.9 + Math.random() * 1.4) + lateral.z * (0.7 + Math.random() * 1.0) + (Math.random() - 0.5) * 0.4;
   st.vy = 0.4 + Math.random() * 0.7;
-  st.s0 = 0.18 + Math.random() * 0.14;
-  st.s1 = 1.0 + Math.random() * 0.85;
-  st.peak = 0.16 + Math.random() * 0.12;
+  st.s0 = 0.22 + Math.random() * 0.16;
+  st.s1 = 1.5 + Math.random() * 1.1;            // fat, voluminous plume (reel-style)
+  st.peak = 0.32 + Math.random() * 0.2;         // thick white smoke, not thin haze
   sp.visible = true;
 }
 function updateSmoke(dt) {
@@ -590,14 +633,24 @@ function updateBurn(dt, recede) {
 let burnAccum = 0;
 let seededAction = false;
 
-// ===== postprocessing — Most-Wanted cinematic chain =====
-// RenderPass → Bloom (lights + bright dusk highlights glow) → OutputPass (tonemap+sRGB)
-// → CinematicPass (radial speed-blur + chromatic aberration + teal/orange grade +
-//    vignette + film grain). The grade runs on display-ready pixels so it behaves
-//    like a real colour-grade LUT rather than fighting the tonemapper.
+// ===== postprocessing — bright-daylight cinematic chain (the reel's look) =====
+// RenderPass → Bokeh (shallow DOF: hero sharp, fg/bg melt) → Bloom (sun glints +
+// specular highlights glow) → OutputPass (tonemap+sRGB) → CinematicPass (edge-only
+// speed-blur + COOL DESATURATED grade + soft vignette + fine grain). The grade runs
+// on display-ready pixels so it behaves like a colour LUT, not fighting the tonemapper.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.18, 0.5, 0.95);
+
+// shallow depth-of-field — the reel keeps the car razor-sharp while the immediate
+// foreground and the hazed-out skyline melt into bokeh. focus tracks the car each
+// frame (see loop); aperture/maxblur tuned so ONLY off-subject depths soften.
+const bokeh = new BokehPass(scene, camera, {
+  focus: 6.0, aperture: 0.00032, maxblur: 0.0042,
+  width: innerWidth, height: innerHeight,
+});
+composer.addPass(bokeh);
+
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.2, 0.6, 0.9);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -644,21 +697,24 @@ const CinematicShader = {
       }
       col /= float(N);
 
-      // ---- cinematic grade: teal-cool shadows, warm-orange highlights ----
+      // ---- bright-daylight grade: cool, clean, DESATURATED (the reel's render look) ----
       float luma = dot(col, vec3(0.299, 0.587, 0.114));
-      vec3 shadowTint = vec3(0.92, 1.00, 1.09);
-      vec3 highTint   = vec3(1.06, 1.00, 0.93);
-      col *= mix(shadowTint, highTint, smoothstep(0.20, 0.80, luma));
-      col = (col - 0.5) * 1.12 + 0.5;            // contrast S-curve
-      col = mix(vec3(luma), col, 1.12);          // saturation lift
+      // gently cool the whole frame (slight blue lift), warm the very brightest
+      // highlights a hair so the sun glints don't go clinical-blue.
+      vec3 shadowTint = vec3(0.97, 1.00, 1.05);   // cool shadows
+      vec3 highTint   = vec3(1.03, 1.005, 0.98);  // faintly warm highlights
+      col *= mix(shadowTint, highTint, smoothstep(0.25, 0.85, luma));
+      col += 0.018;                               // lift blacks (never crushed — reel keeps shadow detail)
+      col = (col - 0.5) * 1.06 + 0.5;             // soft contrast
+      col = mix(vec3(luma), col, 0.86);           // PULL saturation DOWN → desaturated grade
       col = clamp(col, 0.0, 1.0);
 
-      // ---- vignette ----
-      float vig = smoothstep(0.95, 0.25, length(dir) * 1.28);
-      col *= mix(0.74, 1.0, vig);
+      // ---- soft vignette ----
+      float vig = smoothstep(0.98, 0.34, length(dir) * 1.22);
+      col *= mix(0.86, 1.0, vig);
 
-      // ---- film grain ----
-      col += (hash(uv * uResolution + uTime) - 0.5) * 0.055;
+      // ---- fine film grain ----
+      col += (hash(uv * uResolution + uTime) - 0.5) * 0.04;
 
       gl_FragColor = vec4(col, 1.0);
     }
@@ -905,8 +961,8 @@ function animate() {
   updateSmoke(dt);
   updateBurn(dt, _recede);
 
-  // ---- headlight breathing (brighter for the dusk → bloom streaks read like MW) ----
-  const pulse = reduceMotion ? 1.6 : 1.55 + Math.sin(t * 2.0) * 0.3;
+  // ---- headlights stay dim in daylight (no dusk glow); taillights keep their red kiss ----
+  const pulse = reduceMotion ? 0.35 : 0.3 + Math.sin(t * 2.0) * 0.08;
   for (const m of lampMats) if (!/tail|brake/.test((m.name || '').toLowerCase())) m.emissiveIntensity = pulse;
 
   // ---- speed-rush FOV punch: the lens widens as the car gets up to speed + on a tap ----
@@ -917,6 +973,15 @@ function animate() {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 5);
     camera.updateProjectionMatrix();
   }
+
+  // ---- DOF: focus locks onto the car (≈ scene origin at beltline) so it stays razor
+  // sharp while the foreground tarmac and the hazed-out background melt into bokeh ----
+  _look.set(0, LOOK_H, 0);
+  const focusDist = camera.position.distanceTo(_look);
+  bokeh.uniforms['focus'].value = focusDist;
+  // during the tight rim study the subject is much closer — pull focus in so the wheel
+  // is sharp and the body behind it falls off.
+  if (phase === 'detail') bokeh.uniforms['focus'].value = camera.position.distanceTo(frontWheelWorld);
 
   // ---- feed the cinematic grade: speed drives the radial smear + chromatic aberration ----
   cinematic.uniforms.uTime.value = t;
@@ -937,6 +1002,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
   bloom.setSize(innerWidth, innerHeight);
+  bokeh.setSize(innerWidth, innerHeight);
   cinematic.uniforms.uResolution.value.set(innerWidth, innerHeight);
   const dpr = Math.min(window.devicePixelRatio, 2);
   apronMirror.getRenderTarget().setSize(Math.floor(innerWidth * dpr), Math.floor(innerHeight * dpr));
