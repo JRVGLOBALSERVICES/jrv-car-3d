@@ -275,9 +275,119 @@ function scrollCity(dt) {
   if (adv <= 0) return;
   for (let i = 0; i < CITY_N; i++) { cityZ[i] += adv; if (cityZ[i] > CITY_NEAR) cityZ[i] -= CITY_DEPTH; }
   for (let i = 0; i < LAMP_N; i++) { lampZ[i] += adv; if (lampZ[i] > CITY_NEAR) lampZ[i] -= CITY_DEPTH; }
-  placeCity(); placeLamps();
+  for (let i = 0; i < TRAFFIC_N; i++) { trafficZ[i] += adv; if (trafficZ[i] > CITY_NEAR) trafficZ[i] -= CITY_DEPTH; }
+  placeCity(); placeLamps(); placeTraffic();
 }
 const cityFog = new THREE.Fog(0x070b16, 55, 330);  // applied only during PURSUIT
+
+// ---------------------------------------------------------------------------
+// STARFIELD (Rj: "stars"). A shell of points high over the road, additive so
+// they twinkle through the night sky above the real-HDRI city skyline. Faded in
+// only for the night PURSUIT act (no stars at golden hour). Slowly drifts to
+// give the sky life without reading as motion-sickness.
+// ---------------------------------------------------------------------------
+const STAR_N = 1100;
+const starPos = new Float32Array(STAR_N * 3);
+for (let i = 0; i < STAR_N; i++) {
+  // upper hemisphere shell, radius 120–150, kept above the horizon
+  const u = Math.random(), v = Math.random() * 0.5;        // v<0.5 => upper half
+  const th = u * Math.PI * 2, ph = Math.acos(1 - 2 * v);
+  const rad = 120 + Math.random() * 30;
+  starPos[i * 3]     = Math.sin(ph) * Math.cos(th) * rad;
+  starPos[i * 3 + 1] = Math.abs(Math.cos(ph)) * rad * 0.9 + 8;
+  starPos[i * 3 + 2] = Math.sin(ph) * Math.sin(th) * rad;
+}
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({
+  color: 0xdfe8ff, size: 0.55, sizeAttenuation: true,
+  transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+});
+const stars = new THREE.Points(starGeo, starMat);
+stars.frustumCulled = false;
+stars.visible = false;
+scene.add(stars);
+
+// ---------------------------------------------------------------------------
+// TRAFFIC LIGHTS (Rj: "traffic light"). Signal gantries lining the road: a dark
+// pole + a 3-lamp head (red / amber / green), one lamp lit per signal. Bright
+// unlit emissive so bloom halos them and the afterimage smears them into streaks
+// as they rush past. They scroll with the city (car static, world moves).
+// ---------------------------------------------------------------------------
+const TRAFFIC_N = 14;
+const trafficGroup = new THREE.Group();
+trafficGroup.visible = false;
+scene.add(trafficGroup);
+const SIGNAL = [0xff2a2a, 0xffae2a, 0x2bff6a]; // red / amber / green
+const poleMat = new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.6, metalness: 0.4, transparent: true, opacity: 0 });
+const trafficZ = new Float32Array(TRAFFIC_N);
+const trafficObjs = [];
+for (let i = 0; i < TRAFFIC_N; i++) {
+  const side = i % 2 === 0 ? -1 : 1;
+  const x = side * 11.5;
+  const tl = new THREE.Group();
+  // upright pole
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.2, 7, 8), poleMat);
+  pole.position.set(x, 3.5, 0);
+  tl.add(pole);
+  // cantilever arm reaching over the lane
+  const arm = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.22, 0.22), poleMat);
+  arm.position.set(x + side * -1.6, 6.6, 0);
+  tl.add(arm);
+  // signal head (housing + 3 lamps) at the arm tip
+  const lit = (Math.random() * 3) | 0;   // which lamp is on
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 2.0, 0.5), poleMat);
+  head.position.set(x + side * -3.0, 6.0, 0);
+  tl.add(head);
+  for (let k = 0; k < 3; k++) {
+    const on = k === lit;
+    const lampM = new THREE.MeshBasicMaterial({ color: on ? SIGNAL[k] : 0x101216, transparent: true, opacity: 0, toneMapped: false });
+    const lamp = new THREE.Mesh(new THREE.CircleGeometry(0.26, 16), lampM);
+    lamp.position.set(x + side * -3.0, 6.6 - k * 0.6, 0.26);
+    lamp.userData.on = on; lamp.userData.baseColor = SIGNAL[k];
+    tl.add(lamp);
+  }
+  trafficZ[i] = CITY_NEAR - (i / TRAFFIC_N) * CITY_DEPTH - 18;
+  tl.position.z = trafficZ[i];
+  trafficObjs.push(tl);
+  trafficGroup.add(tl);
+}
+function placeTraffic() {
+  for (let i = 0; i < TRAFFIC_N; i++) trafficObjs[i].position.z = trafficZ[i];
+}
+
+// ---------------------------------------------------------------------------
+// WIND / SPEED STREAKS (Rj: "wind movements"). Thin bright motes rushing toward
+// the camera, additive — read as wind-blown light + air streaking past at speed.
+// Scrolls fast with roadSpeed; the afterimage pass elongates them into lines.
+// ---------------------------------------------------------------------------
+const WIND_N = 220;
+const windPos = new Float32Array(WIND_N * 3);
+function seedWind(i) {
+  windPos[i * 3]     = (Math.random() - 0.5) * 30;
+  windPos[i * 3 + 1] = 0.3 + Math.random() * 7;
+  windPos[i * 3 + 2] = -10 - Math.random() * (CITY_DEPTH * 0.6);
+}
+for (let i = 0; i < WIND_N; i++) seedWind(i);
+const windGeo = new THREE.BufferGeometry();
+windGeo.setAttribute('position', new THREE.BufferAttribute(windPos, 3));
+const windMat = new THREE.PointsMaterial({
+  color: 0xbcd4ff, size: 0.4, sizeAttenuation: true,
+  transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false,
+});
+const wind = new THREE.Points(windGeo, windMat);
+wind.frustumCulled = false;
+wind.visible = false;
+scene.add(wind);
+function scrollWind(dt) {
+  const adv = (roadSpeed + 0.4) * dt * 26;
+  const p = windGeo.attributes.position.array;
+  for (let i = 0; i < WIND_N; i++) {
+    p[i * 3 + 2] += adv;
+    if (p[i * 3 + 2] > 14) seedWind(i);
+  }
+  windGeo.attributes.position.needsUpdate = true;
+}
 
 // ---------------------------------------------------------------------------
 // IBL: three real Poly Haven HDRIs as REFLECTION/LIGHTING environments only
@@ -292,28 +402,22 @@ let nightEnv = null;
 const rgbe = new RGBELoader();
 rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  studioEnv = hdr;
-  // environment (reflections + lighting) ONLY — NOT shown as a skybox. The
-  // literal photo-studio projected as a GroundedSkybox read as a stock photo
-  // behind the car; the REVEAL backdrop is now a clean graphite cyclorama
-  // (dome) over the studioFloor, with this HDRI doing the reflections.
-  scene.environment = hdr;
-  scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
-  scene.background = null;
-  if (currentAct === 'reveal') setAct('reveal');   // refresh now that env is in
+  studioEnv = hdr;   // fallback reflection env only (sunset is the reveal env)
+  if (currentAct === 'reveal' && !sunsetEnv) { scene.environment = hdr; setBg(hdr, 0.5, 0.7); }
 });
 rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  sunsetEnv = hdr;   // reflection env for the GOLDEN HOUR act
-  if (currentAct === 'hero') scene.environment = hdr;
+  sunsetEnv = hdr;   // reflection + backdrop for the REVEAL (dusk) + GOLDEN HOUR acts
+  if (currentAct === 'hero') { scene.environment = hdr; setBg(hdr, 0.42, 0.85); }
+  if (currentAct === 'reveal') { scene.environment = hdr; setBg(hdr, 0.5, 0.7); }
 });
 // PURSUIT act: a real night-city HDRI (modern_buildings_night, Poly Haven CC0)
-// — its neon vertical streaks rake across the iridescent clearcoat, selling the
-// chase far better than the recoloured sunset map it replaced.
+// shown as the actual blurred backdrop — the real skyline behind the car, with
+// its neon raking across the iridescent clearcoat.
 rgbe.load(`${BASE}model/modern_buildings_night_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   nightEnv = hdr;
-  if (currentAct === 'speed') scene.environment = hdr;
+  if (currentAct === 'speed') { scene.environment = hdr; setBg(hdr, 0.32, 0.5); }
 });
 
 function frameObject(target) {
@@ -364,17 +468,21 @@ function tuneMaterials(root) {
         // softbox and read as "too shiny / glossy due to lights" (Rj's note).
         // Higher base roughness = the reflections soften into a sheen instead of
         // hard hot specs; clearcoat stays glossy so it still reads as car paint.
-        m.clearcoat = 1.0; m.clearcoatRoughness = 0.09;
-        m.roughness = Math.max(Math.min(m.roughness ?? 0.4, 0.34), 0.26);
-        m.envMapIntensity = 0.95;
-        // iridescence dropped (was 1.0) — the rainbow thin-film was the loudest
-        // part of the over-glossy look. A whisper of it keeps a subtle flake.
-        m.iridescence = 0.12;
-        m.iridescenceIOR = 1.25;
-        m.iridescenceThicknessRange = [200, 560];
-        // a deep graphite blue, not a black mirror (lerp eased 0.55 → 0.32)
-        if (m.color) m.color.lerp(new THREE.Color(0x10131a), 0.32);
-        m.metalness = Math.max(m.metalness ?? 0, 0.45);
+        m.clearcoat = 1.0; m.clearcoatRoughness = 0.12;
+        // roughness lifted a touch so reflected lights read as a SHEEN, not hard
+        // mirror hot-specs (Rj's "too shiny due to lights"). Not a mirror.
+        m.roughness = Math.max(Math.min(m.roughness ?? 0.4, 0.4), 0.30);
+        m.envMapIntensity = 0.9;
+        // IRIDESCENCE RESTORED (Rj: "iridescent colours missing"). The oil-slick
+        // colour-shift is the look he wants — strong enough to read as iridescent
+        // paint, but the controlled exposure (1.0) + high bloom threshold (0.95)
+        // stop it blowing out under the city lights the way full 1.0 mirror did.
+        m.iridescence = 0.85;
+        m.iridescenceIOR = 1.35;
+        m.iridescenceThicknessRange = [260, 820];  // broader band = more hue travel
+        // a deep graphite blue base under the iridescent coat (not a black mirror)
+        if (m.color) m.color.lerp(new THREE.Color(0x121826), 0.30);
+        m.metalness = Math.max(m.metalness ?? 0, 0.5);
       } else if (/chrome|mirror|metal/.test(name)) {
         m.metalness = 1.0; m.roughness = Math.max(Math.min(m.roughness ?? 0.1, 0.22), 0.14);
         m.envMapIntensity = 1.05;
@@ -540,6 +648,26 @@ let currentAct = null;
 const ACT_LABELS = { reveal: 'REVEAL', speed: 'PURSUIT', hero: 'GOLDEN HOUR' };
 const ACT_NUM = { reveal: '01', speed: '02', hero: '03' };
 
+// real HDRI as the cinematic backdrop (blurred so it reads as depth-of-field
+// background, not a flat photo). This is the core "not cartoonish" fix — the car
+// drives against a real city/sky skyline instead of procedural canvas boxes.
+function setBg(env, blur, intensity) {
+  if (!env) return;
+  scene.background = env;
+  scene.backgroundBlurriness = blur;
+  scene.backgroundIntensity = intensity;
+  scene.backgroundRotation = new THREE.Euler(0, ENV_YAW, 0);
+  scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
+}
+// fade traffic-signal lamps: only the lit lamp of each head shows (realistic).
+function fadeTrafficLamps(on) {
+  trafficGroup.traverse((o) => {
+    if (o.isMesh && o.geometry && o.geometry.type === 'CircleGeometry') {
+      gsap.to(o.material, { opacity: on && o.userData.on ? 1 : 0, duration: 1.0 });
+    }
+  });
+}
+
 function setAct(name) {
   if (name === currentAct) return;
   currentAct = name;
@@ -547,54 +675,50 @@ function setAct(name) {
   if (hudActName) hudActName.textContent = ACT_LABELS[name] || '';
   if (hudAct) hudAct.textContent = ACT_NUM[name] || '';
 
-  if (name === 'reveal') {
-    if (studioEnv) scene.environment = studioEnv;
-    // clean graphite studio cyclorama + matte-sheen floor (NOT the literal HDRI)
-    dome.material.map = skyDomeTexture('#23252b', '#0b0c10');
-    dome.material.map.needsUpdate = true;
-    dome.visible = true;
-    gsap.to(dome.material, { opacity: 1, duration: 1.0 });
-    studioFloor.visible = true;
-    gsap.to(studioFloor.material, { opacity: 1, duration: 1.0 });
-    road.visible = true;
-    gsap.to(road.material, { opacity: 0, duration: 0.8, onComplete: () => { road.visible = false; } });
+  // the dome + studio floor are retired — the real HDRI is the backdrop now
+  dome.visible = false;
+  gsap.to(studioFloor.material, { opacity: 0, duration: 0.6, onComplete: () => { studioFloor.visible = false; } });
+  road.visible = true;
+  gsap.to(road.material, { opacity: 1, duration: 0.9 });
+
+  if (name === 'speed') {
+    // PURSUIT — real NIGHT-CITY HDRI backdrop + procedural near-parallax (lit
+    // windows, streetlights, traffic lights) + stars + wind streaks. The HDRI is
+    // the real skyline; the boxes are the buildings rushing past in front of it.
+    if (nightEnv) scene.environment = nightEnv;
+    setBg(nightEnv, 0.32, 0.5);
+    scene.fog = cityFog;
+    cityGroup.visible = true;
+    gsap.to(cityMat, { opacity: 1, duration: 1.1 });
+    gsap.to(lampMat, { opacity: 1, duration: 1.1 });
+    stars.visible = true;            gsap.to(starMat, { opacity: 0.9, duration: 1.2 });
+    trafficGroup.visible = true;     gsap.to(poleMat, { opacity: 1, duration: 1.0 }); fadeTrafficLamps(true);
+    wind.visible = true;             gsap.to(windMat, { opacity: 0.85, duration: 1.0 });
+    setRoadSpeed(2.4); setEngineSpeed(1.85);
+  } else if (name === 'hero') {
+    // GOLDEN HOUR — sunset HDRI hero beauty pass. Warm sky, faint air shimmer.
+    if (sunsetEnv) scene.environment = sunsetEnv;
+    setBg(sunsetEnv, 0.42, 0.85);
+    scene.fog = null;
+    gsap.to(cityMat, { opacity: 0, duration: 0.7 });
+    gsap.to(lampMat, { opacity: 0, duration: 0.7, onComplete: () => { cityGroup.visible = false; } });
+    gsap.to(starMat, { opacity: 0, duration: 0.6, onComplete: () => { stars.visible = false; } });
+    gsap.to(poleMat, { opacity: 0, duration: 0.7 }); fadeTrafficLamps(false);
+    wind.visible = true;             gsap.to(windMat, { opacity: 0.28, duration: 0.7 });
+    setRoadSpeed(0.7); setEngineSpeed(1.15);
+  } else {
+    // REVEAL / ARRIVAL — warm dusk cruise: sunset HDRI reflections + soft backdrop,
+    // road already rolling so it opens ON the move (no sterile studio).
+    const env = sunsetEnv || nightEnv || studioEnv;
+    if (env) scene.environment = env;
+    setBg(env, 0.5, 0.7);
     scene.fog = null;
     gsap.to(cityMat, { opacity: 0, duration: 0.6 });
     gsap.to(lampMat, { opacity: 0, duration: 0.6, onComplete: () => { cityGroup.visible = false; } });
-    setRoadSpeed(0);
-    setEngineSpeed(0.85);
-  } else {
-    // PURSUIT (night city) + GOLDEN HOUR (sunset) street. Fade studio out, road
-    // + dome in, and reflect the act's OWN HDRI off the car.
-    const env = name === 'hero' ? sunsetEnv : nightEnv;
-    if (env) scene.environment = env;
-    // fade the studio floor out — the drive acts ride the scrolling road instead
-    gsap.to(studioFloor.material, { opacity: 0, duration: 0.8, onComplete: () => { studioFloor.visible = false; } });
-    if (scene.background) scene.background = null;
-    dome.visible = true;
-    road.visible = true;
-    // deep-night vs golden-hour dome tint (the HDRI carries the real reflections;
-    // the dome is just the far backdrop gradient behind the road).
-    const top = name === 'hero' ? '#1a1410' : '#05070e';
-    const bot = name === 'hero' ? '#7a3d1c' : '#161b2c';
-    dome.material.map = skyDomeTexture(top, bot);
-    dome.material.map.needsUpdate = true;
-    gsap.to(dome.material, { opacity: 1, duration: 1.0 });
-    gsap.to(road.material, { opacity: 1, duration: 0.9 });
-    if (name === 'speed') {
-      setRoadSpeed(2.4); setEngineSpeed(1.85);
-      // bring the actual night city up + night haze
-      scene.fog = cityFog;
-      cityGroup.visible = true;
-      gsap.to(cityMat, { opacity: 1, duration: 1.1 });
-      gsap.to(lampMat, { opacity: 1, duration: 1.1 });
-    } else {
-      setRoadSpeed(0.6); setEngineSpeed(1.15);
-      // GOLDEN HOUR: no city, no fog
-      scene.fog = null;
-      gsap.to(cityMat, { opacity: 0, duration: 0.7 });
-      gsap.to(lampMat, { opacity: 0, duration: 0.7, onComplete: () => { cityGroup.visible = false; } });
-    }
+    gsap.to(starMat, { opacity: 0, duration: 0.6, onComplete: () => { stars.visible = false; } });
+    gsap.to(poleMat, { opacity: 0, duration: 0.6 }); fadeTrafficLamps(false);
+    wind.visible = true;             gsap.to(windMat, { opacity: 0.22, duration: 0.6 });
+    setRoadSpeed(0.55); setEngineSpeed(0.95);
   }
 }
 function setRoadSpeed(v) { gsap.to({ s: roadSpeed }, { s: v, duration: 1.0, onUpdate() { roadSpeed = this.targets()[0].s; } }); }
@@ -829,6 +953,8 @@ function tick() {
   // scroll the road to sell speed (only matters when it's visible)
   if (roadSpeed > 0.001) roadTex.offset.y -= roadSpeed * 0.016;
   if (cityGroup.visible) scrollCity(0.016);
+  if (wind.visible) scrollWind(0.016);
+  if (stars.visible) stars.rotation.y += 0.0008;
 
   if (mode === 'control') {
     controls.update();
