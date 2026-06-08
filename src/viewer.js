@@ -50,8 +50,11 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, alpha: 
 renderer.setPixelRatio(DPR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.0;   // was 1.15 — eased so bright studio/city
-                                       // reflections on the paint don't blow out
+renderer.toneMappingExposure = 0.82;  // 1.15 → 1.0 → 0.82: Rj "too much white light
+                                       // causing astig". The bright sunset/studio
+                                       // HDRIs were blowing the frame to white and
+                                       // drowning the iridescence. Lower key restores
+                                       // colour + lets the oil-slick hue-shift read.
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -403,13 +406,13 @@ const rgbe = new RGBELoader();
 rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   studioEnv = hdr;   // fallback reflection env only (sunset is the reveal env)
-  if (currentAct === 'reveal' && !sunsetEnv) { scene.environment = hdr; setBg(hdr, 0.5, 0.7); }
+  if (currentAct === 'reveal' && !sunsetEnv) { scene.environment = hdr; setBg(hdr, 0.55, 0.42, 0.58); }
 });
 rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   sunsetEnv = hdr;   // reflection + backdrop for the REVEAL (dusk) + GOLDEN HOUR acts
-  if (currentAct === 'hero') { scene.environment = hdr; setBg(hdr, 0.42, 0.85); }
-  if (currentAct === 'reveal') { scene.environment = hdr; setBg(hdr, 0.5, 0.7); }
+  if (currentAct === 'hero') { scene.environment = hdr; setBg(hdr, 0.5, 0.5, 0.62); }
+  if (currentAct === 'reveal') { scene.environment = hdr; setBg(hdr, 0.55, 0.42, 0.58); }
 });
 // PURSUIT act: a real night-city HDRI (modern_buildings_night, Poly Haven CC0)
 // shown as the actual blurred backdrop — the real skyline behind the car, with
@@ -417,7 +420,7 @@ rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
 rgbe.load(`${BASE}model/modern_buildings_night_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   nightEnv = hdr;
-  if (currentAct === 'speed') { scene.environment = hdr; setBg(hdr, 0.32, 0.5); }
+  if (currentAct === 'speed') { scene.environment = hdr; setBg(hdr, 0.38, 0.32, 0.55); }
 });
 
 function frameObject(target) {
@@ -492,21 +495,24 @@ function tuneMaterials(root) {
         // softbox and read as "too shiny / glossy due to lights" (Rj's note).
         // Higher base roughness = the reflections soften into a sheen instead of
         // hard hot specs; clearcoat stays glossy so it still reads as car paint.
-        m.clearcoat = 1.0; m.clearcoatRoughness = 0.12;
+        m.clearcoat = 1.0; m.clearcoatRoughness = 0.10;
         // roughness lifted a touch so reflected lights read as a SHEEN, not hard
         // mirror hot-specs (Rj's "too shiny due to lights"). Not a mirror.
         m.roughness = Math.max(Math.min(m.roughness ?? 0.4, 0.4), 0.30);
-        m.envMapIntensity = 0.9;
-        // IRIDESCENCE RESTORED (Rj: "iridescent colours missing"). The oil-slick
-        // colour-shift is the look he wants — strong enough to read as iridescent
-        // paint, but the controlled exposure (1.0) + high bloom threshold (0.95)
-        // stop it blowing out under the city lights the way full 1.0 mirror did.
-        m.iridescence = 0.85;
-        m.iridescenceIOR = 1.35;
-        m.iridescenceThicknessRange = [260, 820];  // broader band = more hue travel
-        // a deep graphite blue base under the iridescent coat (not a black mirror)
-        if (m.color) m.color.lerp(new THREE.Color(0x121826), 0.30);
-        m.metalness = Math.max(m.metalness ?? 0, 0.5);
+        m.envMapIntensity = 0.85;
+        // IRIDESCENCE — Rj keeps saying he can't see it. The real culprit was the
+        // bright white env washing it out (now capped via environmentIntensity +
+        // lower exposure). Pushed to full so the oil-slick colour-shift is
+        // unmistakable against the deeper key.
+        m.iridescence = 1.0;
+        m.iridescenceIOR = 1.45;
+        m.iridescenceThicknessRange = [200, 900];  // wider band = more hue travel
+        // a SATURATED deep indigo→teal base so the paint carries real colour even
+        // in diffuse (was a near-grey 30% lerp that read flat/cartoonish).
+        if (m.color) m.color.lerp(new THREE.Color(0x101c3a), 0.62);
+        m.metalness = Math.max(m.metalness ?? 0, 0.6);
+        m.sheen = 1.0; m.sheenRoughness = 0.4;
+        m.sheenColor = new THREE.Color(0x2a5cff);  // colour-shift rim on grazing angles
       } else if (/chrome|mirror|metal/.test(name)) {
         m.metalness = 1.0; m.roughness = Math.max(Math.min(m.roughness ?? 0.1, 0.22), 0.14);
         m.envMapIntensity = 1.05;
@@ -646,10 +652,14 @@ composer.addPass(grade);
 composer.addPass(new OutputPass());
 
 // per-act grade presets (gsap tweens uniforms between them on each act change)
+// Rj: "refocus on coloring". Saturation pushed hard (was 1.04–1.16) and tints
+// given a real chroma per act so the frame carries colour instead of reading
+// white/cartoonish — high saturation is also what makes the iridescent hue-shift
+// visible. Deeper lifts crush the milky shadows that flattened it.
 const GRADES = {
-  reveal: { tint: 0xfff2e6, lift: 0x040404, contrast: 1.04, sat: 1.04, vig: 0.26, grain: 0.03, ca: 0.0 },
-  speed:  { tint: 0xbfe0ff, lift: 0x0a0600, contrast: 1.18, sat: 1.16, vig: 0.42, grain: 0.08, ca: 1.6 },
-  hero:   { tint: 0xffd9a8, lift: 0x0c0602, contrast: 1.08, sat: 1.14, vig: 0.30, grain: 0.04, ca: 0.4 },
+  reveal: { tint: 0xffe4c2, lift: 0x060507, contrast: 1.10, sat: 1.30, vig: 0.34, grain: 0.04, ca: 0.0 },
+  speed:  { tint: 0x9cc6ff, lift: 0x05060e, contrast: 1.26, sat: 1.42, vig: 0.48, grain: 0.09, ca: 1.8 },
+  hero:   { tint: 0xffc97e, lift: 0x0c0703, contrast: 1.14, sat: 1.34, vig: 0.34, grain: 0.05, ca: 0.5 },
 };
 function applyGrade(name, dur = 1.0) {
   const g = GRADES[name]; if (!g) return;
@@ -675,11 +685,16 @@ const ACT_NUM = { reveal: '01', speed: '02', hero: '03' };
 // real HDRI as the cinematic backdrop (blurred so it reads as depth-of-field
 // background, not a flat photo). This is the core "not cartoonish" fix — the car
 // drives against a real city/sky skyline instead of procedural canvas boxes.
-function setBg(env, blur, intensity) {
+function setBg(env, blur, intensity, envI = 0.6) {
   if (!env) return;
   scene.background = env;
   scene.backgroundBlurriness = blur;
   scene.backgroundIntensity = intensity;
+  // Cap how hard the HDRI lights the car. With no cap the bright sunset/studio
+  // skies flooded the paint white (Rj: "too much white light") and washed the
+  // iridescence out. Holding the env energy down is the single biggest fix —
+  // deeper, more saturated reflections let the oil-slick colour-shift read.
+  scene.environmentIntensity = envI;
   scene.backgroundRotation = new THREE.Euler(0, ENV_YAW, 0);
   scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
 }
@@ -710,7 +725,7 @@ function setAct(name) {
     // windows, streetlights, traffic lights) + stars + wind streaks. The HDRI is
     // the real skyline; the boxes are the buildings rushing past in front of it.
     if (nightEnv) scene.environment = nightEnv;
-    setBg(nightEnv, 0.32, 0.5);
+    setBg(nightEnv, 0.38, 0.32, 0.55);
     scene.fog = cityFog;
     cityGroup.visible = true;
     gsap.to(cityMat, { opacity: 1, duration: 1.1 });
@@ -722,7 +737,7 @@ function setAct(name) {
   } else if (name === 'hero') {
     // GOLDEN HOUR — sunset HDRI hero beauty pass. Warm sky, faint air shimmer.
     if (sunsetEnv) scene.environment = sunsetEnv;
-    setBg(sunsetEnv, 0.42, 0.85);
+    setBg(sunsetEnv, 0.5, 0.5, 0.62);
     scene.fog = null;
     gsap.to(cityMat, { opacity: 0, duration: 0.7 });
     gsap.to(lampMat, { opacity: 0, duration: 0.7, onComplete: () => { cityGroup.visible = false; } });
@@ -735,7 +750,7 @@ function setAct(name) {
     // road already rolling so it opens ON the move (no sterile studio).
     const env = sunsetEnv || nightEnv || studioEnv;
     if (env) scene.environment = env;
-    setBg(env, 0.5, 0.7);
+    setBg(env, 0.55, 0.42, 0.58);
     scene.fog = null;
     gsap.to(cityMat, { opacity: 0, duration: 0.6 });
     gsap.to(lampMat, { opacity: 0, duration: 0.6, onComplete: () => { cityGroup.visible = false; } });
