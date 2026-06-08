@@ -48,7 +48,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 // was the main reason the orange read "faded"/chalky under the bright clear sky.
 // Neutral holds the candy saturation while still rolling off the sky highlights.
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.06;
+renderer.toneMappingExposure = 0.94;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -80,7 +80,7 @@ new RGBELoader().load('model/belfast_sunset_puresky_2k.hdr', (hdr) => {
   skyEquirect = hdr;
   skyEnv = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = skyEnv;
-  scene.environmentIntensity = 1.15;
+  scene.environmentIntensity = 0.95;
   if (revealed) applySkyBackground();
 });
 
@@ -88,7 +88,7 @@ scene.background = new THREE.Color(0x0d1119);   // deep dusk-blue behind the rim
 
 function applySkyBackground() {
   if (!skyEquirect) return;
-  scene.environmentIntensity = 1.3;             // sky carries the gloss reflections (bg dimmed separately)
+  scene.environmentIntensity = 1.0;             // sky carries the gloss reflections (bg dimmed separately)
   scene.background = skyEquirect;
   scene.backgroundBlurriness = 0.14;            // softer dusk dome → bright horizon doesn't blow out
   scene.backgroundIntensity = 0.6;
@@ -130,7 +130,7 @@ scene.add(new THREE.AmbientLight(0x33415c, 0.30));   // cool dusk ambient (teal 
 
 // the SUN — low, warm, raking. Long dramatic shadow + a hot orange clearcoat streak
 // down the flank (the Most-Wanted golden-hour kiss).
-const key = new THREE.DirectionalLight(0xffd9b4, 2.6);
+const key = new THREE.DirectionalLight(0xffd9b4, 1.7);
 key.position.set(7, 6, 5);                          // lower than midday → longer rake
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
@@ -141,25 +141,25 @@ key.shadow.bias = -0.0004; key.shadow.radius = 6;
 scene.add(key);
 
 // deep-blue twilight fill — cool bounce from the opposite sky (carves the teal shadow side)
-const skyFill = new THREE.DirectionalLight(0x5874a8, 0.85);
+const skyFill = new THREE.DirectionalLight(0x5874a8, 0.55);
 skyFill.position.set(-6, 5, -3);
 scene.add(skyFill);
 
 // cold rim from behind to carve the silhouette against the dusk
-const rim = new THREE.DirectionalLight(0xbcd0ff, 1.1);
+const rim = new THREE.DirectionalLight(0xbcd0ff, 0.8);
 rim.position.set(-2, 3, -7);
 scene.add(rim);
 
 // camera-side fill — at dusk the raking sun lights the FAR flank, so the near
 // (camera) side falls into shadow and the paint reads dark/crimson. This warm fill
 // puts a glossy specular hit back on the visible side without flattening the mood.
-const frontFill = new THREE.DirectionalLight(0xfff0e2, 0.9);
+const frontFill = new THREE.DirectionalLight(0xfff0e2, 0.65);
 frontFill.position.set(0, 3.5, 8);
 scene.add(frontFill);
 
 // ONE brand accent — a warm JRV-orange kiss along the near flank. Restraint:
 // a single tinted light reads as a signature glint, not a stage-gel disco.
-const accent = new THREE.DirectionalLight(JRV.orange, 0.7);
+const accent = new THREE.DirectionalLight(JRV.orange, 0.5);
 accent.position.set(6, 2.2, 3.5);
 scene.add(accent);
 
@@ -597,7 +597,7 @@ let seededAction = false;
 //    like a real colour-grade LUT rather than fighting the tonemapper.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.34, 0.5, 0.9);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.18, 0.5, 0.95);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -622,12 +622,17 @@ const CinematicShader = {
     void main() {
       vec2 uv = vUv;
       vec2 dir = uv - 0.5;                       // outward from centre
-      float edge = dot(dir, dir);                // 0 centre → ~0.5 corner
+      float r = length(dir);                     // 0 centre → ~0.7 corner
       float speedAmt = uSpeed * 0.55 + uThrottle * 0.55;
 
-      // ---- radial speed blur smeared toward centre, harder at the edges + faster ----
-      float blurStr = speedAmt * edge * 1.0;
-      float chroma  = 0.0016 + speedAmt * 0.0045;   // chromatic aberration grows with speed
+      // ---- radial speed blur — HERO STAYS SHARP ----
+      // The car sits in the central frame, so the smear must be masked OUT of a
+      // generous middle zone and only streak the rushing track at the edges. A flat
+      // dot()-falloff (old version) still blurred the car; this keeps a hard sharp
+      // core (periph≈0 until r>0.34) so the 911 is always crisp.
+      float periph  = smoothstep(0.34, 0.66, r);
+      float blurStr = speedAmt * periph * 0.6;       // edges-only, capped
+      float chroma  = speedAmt * 0.0030 * periph;    // no fringing on the hero (zero at centre)
       vec3 col = vec3(0.0);
       const int N = 8;
       for (int i = 0; i < N; i++) {
@@ -901,7 +906,7 @@ function animate() {
   updateBurn(dt, _recede);
 
   // ---- headlight breathing (brighter for the dusk → bloom streaks read like MW) ----
-  const pulse = reduceMotion ? 2.4 : 2.3 + Math.sin(t * 2.0) * 0.4;
+  const pulse = reduceMotion ? 1.6 : 1.55 + Math.sin(t * 2.0) * 0.3;
   for (const m of lampMats) if (!/tail|brake/.test((m.name || '').toLowerCase())) m.emissiveIntensity = pulse;
 
   // ---- speed-rush FOV punch: the lens widens as the car gets up to speed + on a tap ----
