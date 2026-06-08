@@ -4,159 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>JRV · 911 — orbit the GT3 RS</title>
-    <meta name="description" content="The JRV 911 GT3 RS — real-time Three.js, studio HDRI, clearcoat paint and real chrome. Drag to orbit freely; scroll to zoom." />
+    <meta name="description" content="The JRV 911 GT3 RS in real-time Three.js — a real night HDRI, AgX tone mapping, a Reflector wet-floor and iridescent clearcoat. Drag to orbit freely; scroll to zoom." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/src/tokens.css" />
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { height: 100%; overflow: hidden; background: var(--color-bg); }
-      body { font-family: var(--font-display); color: var(--color-ink); }
-      #scene { position: fixed; inset: 0; display: block; touch-action: none; }
-
-      .chrome { position: fixed; inset: 0; pointer-events: none; z-index: 2; }
-      .brand {
-        position: absolute; top: var(--space-lg); left: var(--space-lg);
-        display: flex; align-items: baseline; gap: 10px;
-      }
-      .brand .mark { font-weight: 700; font-size: 22px; letter-spacing: -0.02em; color: var(--color-ink); }
-      .brand .mark b { color: var(--color-accent); }
-      .brand .sub {
-        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.28em;
-        text-transform: uppercase; color: var(--color-ink-dim);
-      }
-      .back {
-        position: absolute; top: var(--space-lg); right: var(--space-lg);
-        pointer-events: auto; cursor: pointer; text-decoration: none;
-        display: inline-flex; align-items: center; gap: 8px;
-        padding: 8px 14px; border-radius: 999px;
-        background: rgba(12, 14, 16, 0.42); backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.18em;
-        text-transform: uppercase; color: var(--color-ink);
-        transition: border-color 0.2s ease;
-      }
-      .back:hover { border-color: var(--color-accent); }
-      .name {
-        position: absolute; left: var(--space-lg); bottom: var(--space-xl);
-        max-width: min(480px, 80vw);
-      }
-      .name .tag {
-        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.28em;
-        text-transform: uppercase; color: var(--color-accent); margin-bottom: 12px;
-      }
-      .name h1 {
-        font-size: clamp(40px, min(8vw, 12vh), 88px);
-        font-weight: 700; line-height: 0.94; letter-spacing: -0.03em; color: var(--color-ink);
-      }
-      .name h1 em { font-style: normal; color: var(--color-accent); }
-      .name p {
-        margin-top: var(--space-md);
-        font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
-        color: var(--color-ink-dim); max-width: 44ch;
-      }
-      .hint {
-        position: absolute; right: var(--space-lg); bottom: var(--space-xl);
-        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em;
-        text-transform: uppercase; color: var(--color-ink-dim); text-align: right; line-height: 2;
-      }
-      .hint .dot {
-        display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-        background: var(--color-glow); margin-right: 8px; vertical-align: middle;
-        box-shadow: 0 0 10px var(--color-glow);
-      }
-
-      /* --- cinematic HUD: act ticker (top-centre) + sound toggle --- */
-      .ticker {
-        position: absolute; top: var(--space-lg); left: 50%; transform: translateX(-50%);
-        display: flex; align-items: baseline; gap: 10px;
-        font-family: var(--font-mono); text-transform: uppercase;
-      }
-      .ticker .num {
-        font-size: 12px; letter-spacing: 0.1em; color: var(--color-accent);
-        font-variant-numeric: tabular-nums;
-      }
-      .ticker .sep { width: 26px; height: 1px; background: rgba(255,255,255,0.28); transform: translateY(-3px); }
-      .ticker .act { font-size: 11px; letter-spacing: 0.34em; color: var(--color-ink-dim); }
-
-      .sound {
-        position: absolute; right: var(--space-lg); bottom: var(--space-xl);
-        pointer-events: auto; cursor: pointer;
-        display: inline-flex; align-items: center; gap: 9px;
-        padding: 9px 15px; border-radius: 999px;
-        background: rgba(12, 14, 16, 0.42); backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em;
-        text-transform: uppercase; color: var(--color-ink-dim);
-        transition: border-color 0.2s ease, color 0.2s ease;
-      }
-      .sound:hover { border-color: var(--color-accent); }
-      .sound .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
-      .sound .eq i { width: 2px; height: 4px; background: currentColor; border-radius: 1px; }
-      .sound.on { color: var(--color-glow); border-color: var(--color-glow); }
-      .sound.on .eq i { animation: eq 0.7s ease-in-out infinite alternate; }
-      .sound.on .eq i:nth-child(2){ animation-delay: .15s } .sound.on .eq i:nth-child(3){ animation-delay: .3s }
-      .sound .lbl-off { display: inline; } .sound .lbl-on { display: none; }
-      .sound.on .lbl-off { display: none; } .sound.on .lbl-on { display: inline; }
-      @keyframes eq { from { height: 3px } to { height: 11px } }
-
-      #loader {
-        position: fixed; inset: 0; z-index: 3; display: grid; place-items: center;
-        background: var(--color-bg); transition: opacity 0.5s ease;
-      }
-      #loader.gone { opacity: 0; pointer-events: none; }
-      .rev { display: flex; flex-direction: column; align-items: center; gap: 14px; }
-      .rev-pct {
-        font-family: var(--font-mono); font-weight: 500;
-        font-size: clamp(56px, 14vw, 132px); line-height: 1; letter-spacing: -0.04em;
-        color: var(--color-ink); font-variant-numeric: tabular-nums;
-      }
-      .rev-pct i { font-style: normal; font-size: 0.36em; color: var(--color-ink-dim); margin-left: 4px; }
-      .rev-label {
-        font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.34em;
-        text-transform: uppercase; color: var(--color-ink-dim);
-      }
-      .rev-label b { color: var(--color-accent); }
-
-      @media (max-width: 640px) {
-        .brand, .name { left: var(--space-md); }
-        .brand { top: var(--space-md); }
-        .back { top: var(--space-md); right: var(--space-md); }
-        .ticker { top: 58px; }
-        .name { bottom: 110px; }
-        .hint { display: none; }
-        .sound { right: var(--space-md); bottom: 40px; }
-      }
-    </style>
+    <link rel="stylesheet" href="/src/scene.css" />
+    <style>:root { --accent: var(--color-accent); }</style>
   </head>
   <body>
     <canvas id="scene"></canvas>
 
     <div class="chrome">
-      <div class="brand">
-        <span class="mark">JRV<b>.</b></span>
-        <span class="sub">Systems</span>
-      </div>
+      <div class="brand"><span class="mark">JRV<b>.</b></span><span class="sub">Systems</span></div>
       <a class="back" href="/">← Back to live hero</a>
-      <div class="ticker">
-        <span class="num" id="hud-act">01</span>
-        <span class="sep"></span>
-        <span class="act" id="hud-act-name">REVEAL</span>
-      </div>
       <div class="name">
-        <div class="tag">Real-time · cinematic reel</div>
+        <div class="tag">Real-time · drag to orbit</div>
         <h1>Meet the <em>911</em></h1>
-        <p>The GT3 RS in live Three.js. It runs an attract reel — studio reveal, dusk pursuit, golden-hour hero — then drag any time to take the wheel.</p>
+        <p>The GT3 RS in live Three.js — lit by a real night HDRI, AgX-graded, on a Reflector wet-floor. Drag to take the wheel; let go and it idles on a slow turn.</p>
       </div>
       <div class="hint">
-        <div><span class="dot"></span>drag to take the wheel · scroll to zoom</div>
-        <div>three.js · gsap director · film-grade postfx</div>
+        <div><span class="dot"></span>drag to orbit · scroll to zoom</div>
+        <div>three.js · AgX · reflector floor</div>
+        <div class="go"><a href="/night-street.html">Backstreet →</a> · <a href="/night-city.html">After Dark →</a></div>
       </div>
-      <button class="sound" id="sound-toggle" type="button" aria-label="Toggle sound">
-        <span class="eq"><i></i><i></i><i></i></span>
-        <span class="lbl-off">Sound off</span><span class="lbl-on">Sound on</span>
-      </button>
     </div>
 
     <div id="loader">
@@ -166,6 +37,18 @@
       </div>
     </div>
 
-    <script type="module" src="/src/viewer.js"></script>
+    <script>
+      window.__MOOD = {
+        hdri: 'cobblestone_street_night_2k.hdr',
+        label: 'Orbit',
+        exposure: 1.0,
+        bgBlur: 0.12,
+        bgIntensity: 0.5,
+        envIntensity: 0.85,
+        rimColor: 0xffb072,
+        keyColor: 0xdce6ff,
+      };
+    </script>
+    <script type="module" src="/src/showroom.js"></script>
   </body>
 </html>

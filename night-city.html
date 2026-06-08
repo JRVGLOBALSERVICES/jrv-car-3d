@@ -4,92 +4,59 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>JRV · 911 GT3 RS — After Dark</title>
-    <meta name="description" content="A Porsche 911 GT3 RS turns under a Berlin plaza at night — thin-film clearcoat shifting green to violet across the panels. Scroll to rotate. Rendered frame-by-frame in Blender Cycles, played back as an iOS-safe canvas scrub by JRV." />
+    <meta name="description" content="A real-time Three.js Porsche 911 GT3 RS under a night-city skyline — a real Poly Haven HDRI, AgX tone mapping, Reflector wet-floor, iridescent clearcoat shifting green to violet. Drag to orbit." />
     <meta property="og:title" content="JRV · 911 GT3 RS — After Dark" />
-    <meta property="og:description" content="Thin-film paint under city light. A Cycles turntable you scroll to rotate." />
+    <meta property="og:description" content="Night-city light, iridescent paint — live WebGL. Drag to orbit." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="./seq-a/frame_000.webp" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="preload" as="image" href="./seq-a/frame_000.webp" fetchpriority="high" />
     <link rel="stylesheet" href="/src/tokens.css" />
-    <link rel="stylesheet" href="/src/scrub.css" />
+    <link rel="stylesheet" href="/src/scene.css" />
     <style>:root { --accent: var(--color-glow); }</style>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "ImageObject",
-      "name": "JRV 911 GT3 RS — After Dark turntable",
-      "creditText": "JRV",
-      "creator": { "@type": "Organization", "name": "JRV" },
-      "description": "Porsche 911 GT3 RS with thin-film iridescent paint, rendered in Blender Cycles under a Berlin night-plaza HDRI.",
-      "contentUrl": "./seq-a/frame_000.webp",
-      "license": "https://creativecommons.org/licenses/by/4.0/"
-    }
-    </script>
   </head>
   <body>
-    <canvas id="scene" data-seq="./seq-a" data-count="30" aria-label="Porsche 911 GT3 RS rotating under a city plaza at night. Scroll to rotate the car."></canvas>
-    <div class="scrim"></div>
+    <canvas id="scene"></canvas>
 
     <div class="chrome">
       <div class="brand"><span class="mark">JRV<b>.</b></span><span class="sub">After Dark</span></div>
       <a class="back" href="/index.html">← back to drift</a>
-    </div>
-    <div class="rail"><i></i></div>
-
-    <!-- editorial beats -->
-    <div class="beat at-bl on" data-at="0.0" data-span="0.16">
-      <div class="kicker">911 GT3 RS · Night plaza</div>
-      <h1>City lights,<br /><em>oil-slick</em></h1>
-      <p>Thin-film clearcoat, rendered frame-by-frame in Blender Cycles. The hue walks from green through teal to violet as the plaza light rakes the panels. Scroll to turn it.</p>
-    </div>
-
-    <div class="beat at-tr" data-at="0.34" data-span="0.16">
-      <div class="kicker">01 — Paint</div>
-      <h2>Thin-film,<br />not a sticker</h2>
-      <p>A 510-nanometre interference film over a deep-indigo base. The colour shift is physical optics — real, not a decal. This is the look real-time WebGL paint can’t reach.</p>
-    </div>
-
-    <div class="beat at-cl" data-at="0.62" data-span="0.16">
-      <div class="kicker">02 — Form</div>
-      <h2>992 profile,<br />real reflections</h2>
-      <div class="spec">
-        <div><b>4.0L</b><span>flat-six</span></div>
-        <div><b>525</b><span>hp</span></div>
-        <div><b>9k</b><span>redline rpm</span></div>
+      <div class="name">
+        <div class="tag">911 GT3 RS · Night city · live WebGL</div>
+        <h1>City light,<br /><em>oil-slick paint</em></h1>
+        <p>The same GT3 RS under a cool night-city skyline. Neon rakes across the clearcoat and the thin-film shifts green to violet across the panels. Drag to orbit; it idles on a slow turn.</p>
       </div>
-      <p>Swan-neck wing, centre-lock wheels, lit by an actual Berlin plaza HDRI. Wet ground, true mirror reflections — no faked floor.</p>
-    </div>
-
-    <div class="beat at-br" data-at="0.92" data-span="0.16">
-      <div class="kicker">03 — More</div>
-      <h2>Two ways<br />to see it</h2>
-      <div class="go">
-        <a class="primary" href="/night-street.html">Backstreet cut →</a>
-        <a href="/model.html">Spin in 3D</a>
-        <a href="/index.html">Drift reel</a>
+      <div class="hint">
+        <div><span class="dot"></span>drag to orbit · scroll to zoom</div>
+        <div>three.js · AgX · reflector floor</div>
+        <div class="go"><a href="/night-street.html">Backstreet cut →</a></div>
       </div>
     </div>
-
-    <div class="cue">scroll to rotate<span class="arrow"></span></div>
 
     <div id="loader">
       <div class="rev">
         <div class="rev-pct"><span id="pct">0</span><i>%</i></div>
-        <span class="rev-label">RENDERING <b>AFTER DARK</b></span>
-        <div class="rev-bar"><div id="revfill"></div></div>
+        <span class="rev-label">LOADING <b>AFTER DARK</b></span>
       </div>
     </div>
 
-    <div class="scrub-track"></div>
-
     <div class="credit">
-      Model: <a href="https://sketchfab.com/3d-models/2023-porsche-911-gt3-rs-992-bbb0f6181a52416bb776713cfd4987dd" target="_blank" rel="noopener">“2023 Porsche 911 GT3 RS (992)”</a> by supercarmodels — CC-BY-4.0 · HDRI: <a href="https://polyhaven.com/a/hansaplatz" target="_blank" rel="noopener">Hansaplatz</a> — Poly Haven CC0 · Cycles + AgX render by JRV
+      Model: <a href="https://sketchfab.com/3d-models/2023-porsche-911-gt3-rs-992-bbb0f6181a52416bb776713cfd4987dd" target="_blank" rel="noopener">“2023 Porsche 911 GT3 RS (992)”</a> by supercarmodels — CC-BY-4.0 · HDRI: <a href="https://polyhaven.com/a/modern_buildings_night" target="_blank" rel="noopener">Modern Buildings Night</a> — Poly Haven CC0 · Real-time Three.js + AgX by JRV
     </div>
 
-    <script type="module" src="/src/scrub.js"></script>
+    <script>
+      window.__MOOD = {
+        hdri: 'modern_buildings_night_2k.hdr',
+        label: 'After Dark',
+        exposure: 0.8,
+        bgBlur: 0.2,
+        bgIntensity: 0.3,
+        envIntensity: 0.68,
+        rimColor: 0x6ea0ff,
+        keyColor: 0xeaf0ff,
+      };
+    </script>
+    <script type="module" src="/src/showroom.js"></script>
   </body>
 </html>

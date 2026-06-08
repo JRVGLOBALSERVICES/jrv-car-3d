@@ -4,91 +4,59 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>JRV · 911 GT3 RS — Backstreet</title>
-    <meta name="description" content="A Porsche 911 GT3 RS turns on a wet cobblestone street at night — sodium light pooling on the clearcoat, iridescence smouldering teal against amber walls. Scroll to rotate. Rendered in Blender Cycles, played back as an iOS-safe canvas scrub by JRV." />
+    <meta name="description" content="A real-time Three.js Porsche 911 GT3 RS on a wet cobblestone street at night — a real Poly Haven HDRI, AgX tone mapping, Reflector wet-floor, iridescent clearcoat. Drag to orbit." />
     <meta property="og:title" content="JRV · 911 GT3 RS — Backstreet" />
-    <meta property="og:description" content="Wet cobbles, sodium glow, iridescent paint. A Cycles turntable you scroll to rotate." />
+    <meta property="og:description" content="Wet cobbles, sodium glow, iridescent paint — live WebGL. Drag to orbit." />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="./seq-b/frame_000.webp" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
-    <link rel="preload" as="image" href="./seq-b/frame_000.webp" fetchpriority="high" />
     <link rel="stylesheet" href="/src/tokens.css" />
-    <link rel="stylesheet" href="/src/scrub.css" />
+    <link rel="stylesheet" href="/src/scene.css" />
     <style>:root { --accent: var(--color-accent); }</style>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "ImageObject",
-      "name": "JRV 911 GT3 RS — Backstreet turntable",
-      "creditText": "JRV",
-      "creator": { "@type": "Organization", "name": "JRV" },
-      "description": "Porsche 911 GT3 RS with thin-film iridescent paint, rendered in Blender Cycles on a wet cobblestone street at night.",
-      "contentUrl": "./seq-b/frame_000.webp",
-      "license": "https://creativecommons.org/licenses/by/4.0/"
-    }
-    </script>
   </head>
   <body>
-    <canvas id="scene" data-seq="./seq-b" data-count="30" aria-label="Porsche 911 GT3 RS rotating on a wet cobblestone street at night. Scroll to rotate the car."></canvas>
-    <div class="scrim"></div>
+    <canvas id="scene"></canvas>
 
     <div class="chrome">
       <div class="brand"><span class="mark">JRV<b>.</b></span><span class="sub">Backstreet</span></div>
       <a class="back" href="/index.html">← back to drift</a>
-    </div>
-    <div class="rail"><i></i></div>
-
-    <div class="beat at-bl on" data-at="0.0" data-span="0.16">
-      <div class="kicker">911 GT3 RS · Wet cobbles</div>
-      <h1>Sodium glow,<br /><em>wet stone</em></h1>
-      <p>A narrow cobblestone street after rain. Warm light pools on the clearcoat while the thin-film iridescence smoulders teal against the amber walls. Scroll to turn it.</p>
-    </div>
-
-    <div class="beat at-tr" data-at="0.34" data-span="0.16">
-      <div class="kicker">01 — Light</div>
-      <h2>One warm key,<br />deep shadow</h2>
-      <p>Lit by a single real street HDRI — no studio softboxes. The car sits in shadow and lets the paint do the talking, the way a parked GT3 RS actually reads at night.</p>
-    </div>
-
-    <div class="beat at-cl" data-at="0.62" data-span="0.16">
-      <div class="kicker">02 — Paint</div>
-      <h2>The same film,<br />a warmer room</h2>
-      <div class="spec">
-        <div><b>510</b><span>nm thin-film</span></div>
-        <div><b>1.45</b><span>film IOR</span></div>
-        <div><b>AgX</b><span>view transform</span></div>
+      <div class="name">
+        <div class="tag">911 GT3 RS · Wet cobbles · live WebGL</div>
+        <h1>Sodium glow,<br /><em>wet stone</em></h1>
+        <p>A narrow cobblestone street after rain — lit by one real night HDRI, no studio softboxes. The thin-film clearcoat smoulders teal against the amber walls. Drag to orbit; it idles on a slow turn.</p>
       </div>
-      <p>Identical paint to the After Dark cut — only the world changed. Warm walls pull the iridescence toward gold at the edges. Environment is the grade, not a slider.</p>
-    </div>
-
-    <div class="beat at-br" data-at="0.92" data-span="0.16">
-      <div class="kicker">03 — More</div>
-      <h2>Two ways<br />to see it</h2>
-      <div class="go">
-        <a class="primary" href="/night-city.html">After Dark cut →</a>
-        <a href="/model.html">Spin in 3D</a>
-        <a href="/index.html">Drift reel</a>
+      <div class="hint">
+        <div><span class="dot"></span>drag to orbit · scroll to zoom</div>
+        <div>three.js · AgX · reflector floor</div>
+        <div class="go"><a href="/night-city.html">After Dark cut →</a></div>
       </div>
     </div>
-
-    <div class="cue">scroll to rotate<span class="arrow"></span></div>
 
     <div id="loader">
       <div class="rev">
         <div class="rev-pct"><span id="pct">0</span><i>%</i></div>
-        <span class="rev-label">RENDERING <b>BACKSTREET</b></span>
-        <div class="rev-bar"><div id="revfill"></div></div>
+        <span class="rev-label">LOADING <b>BACKSTREET</b></span>
       </div>
     </div>
 
-    <div class="scrub-track"></div>
-
     <div class="credit">
-      Model: <a href="https://sketchfab.com/3d-models/2023-porsche-911-gt3-rs-992-bbb0f6181a52416bb776713cfd4987dd" target="_blank" rel="noopener">“2023 Porsche 911 GT3 RS (992)”</a> by supercarmodels — CC-BY-4.0 · HDRI: <a href="https://polyhaven.com/a/cobblestone_street_night" target="_blank" rel="noopener">Cobblestone Street Night</a> — Poly Haven CC0 · Cycles + AgX render by JRV
+      Model: <a href="https://sketchfab.com/3d-models/2023-porsche-911-gt3-rs-992-bbb0f6181a52416bb776713cfd4987dd" target="_blank" rel="noopener">“2023 Porsche 911 GT3 RS (992)”</a> by supercarmodels — CC-BY-4.0 · HDRI: <a href="https://polyhaven.com/a/cobblestone_street_night" target="_blank" rel="noopener">Cobblestone Street Night</a> — Poly Haven CC0 · Real-time Three.js + AgX by JRV
     </div>
 
-    <script type="module" src="/src/scrub.js"></script>
+    <script>
+      window.__MOOD = {
+        hdri: 'cobblestone_street_night_2k.hdr',
+        label: 'Backstreet',
+        exposure: 1.0,
+        bgBlur: 0.12,
+        bgIntensity: 0.5,
+        envIntensity: 0.85,
+        rimColor: 0xffb072,
+        keyColor: 0xdce6ff,
+      };
+    </script>
+    <script type="module" src="/src/showroom.js"></script>
   </body>
 </html>
