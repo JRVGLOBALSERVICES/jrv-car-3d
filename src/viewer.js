@@ -998,7 +998,10 @@ function tick() {
   // spin the wheels — tied to the same speed that scrolls the road/city, so the
   // tyres roll in step with the world rushing past (idle cruise → fast pursuit).
   if (wheelPivots.length) {
-    wheelAngle += (roadSpeed + 0.25) * 0.13;   // +0.25 so they idle-roll, never dead
+    // car travels toward -z (world scrolls +z past it), so a forward-rolling
+    // wheel's top moves -z => NEGATIVE rotation.x. Was positive => wheels span
+    // backwards against travel (Rj: "car moves backwards"). Flipped to -=.
+    wheelAngle -= (roadSpeed + 0.25) * 0.13;   // +0.25 so they idle-roll, never dead
     for (const p of wheelPivots) p.rotation.x = wheelAngle;
   }
 
