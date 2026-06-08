@@ -3,6 +3,7 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GroundedSkybox } from 'three/addons/objects/GroundedSkybox.js';
 
 // Interactive GT3 RS — same car + studio HDRI as the Cycles hero, free-orbit,
 // and built to stay smooth on a phone. The home hero proves Three.js itself is
@@ -14,9 +15,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 //   2. transmission glass (a separate full-scene render-target pass each frame,
 //      and wrongly applied to metal too — half the "ugly"). Gone. Windows are a
 //      cheap dark tint now.
-// On top of that: RENDER-ON-DEMAND. We only draw a frame while you're orbiting
-// or it's auto-spinning; idle costs zero GPU. That makes this strictly lighter
-// than the home hero you already confirmed smooth.
+// This renders CONTINUOUSLY, exactly like the home hero that's confirmed smooth
+// on a phone (which carries far more — Reflector + bloom + bokeh + a shader pass).
+// An earlier build gated rendering on interaction ("render-on-demand"); on a phone
+// there's no hover to trigger the first frame, so the car + HDRI backdrop never
+// painted until you tapped. Continuous render makes "first frame shows everything"
+// true by construction. At 92 draw calls this is a fraction of the home hero's load.
 
 const canvas = document.getElementById('scene');
 const loaderEl = document.getElementById('loader');
@@ -31,24 +35,20 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, alpha: 
 renderer.setPixelRatio(DPR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping; // matches the AgX hero grade far better than ACES
-renderer.toneMappingExposure = 0.95;
+renderer.toneMappingExposure = 1.15; // brighter, warm studio like the Cycles reference (was a gloomy 0.95)
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
 
-// render-on-demand dirty flag — set true whenever something needs a fresh frame
-let dirty = true;
 
-// The studio scenery (windows, winter trees, plant, polished floor) IS the HDRI.
-// We set scene.background = that same HDRI below in the RGBELoader callback so
-// the viewer shows the environment AS the backdrop — exactly like the Cycles
-// render — instead of a flat dark fill. A faint blur gives it the render's soft
-// depth-of-field; intensity is tuned so it doesn't blow out behind the car.
-// (A neutral gradient is shown until the HDRI finishes loading, to avoid a flash
-// of black.)
-scene.background = new THREE.Color(0x14171c);
-scene.backgroundBlurriness = 0.035; // slight DoF like the render, windows still read
-scene.backgroundIntensity = 0.95;
+// The studio scenery (windows, plant, louvre doors, polished floor) IS the HDRI.
+// A FLAT equirect background never blends with a separate floor plane: the
+// backdrop's floor meets your geometry floor at the horizon as a hard seam (the
+// exact "scene/floor/car don't blend" bug). The fix is a GroundedSkybox — it
+// bends the HDRI's lower hemisphere DOWN into a flat ground that the car sits
+// on, so room + floor + car are one continuous lit space, like the render.
+// Built in the RGBELoader callback below. A neutral fill shows until it loads.
+scene.background = new THREE.Color(0x141414);
 
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.position.set(4.2, 1.6, 5.2);
@@ -61,24 +61,18 @@ controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI * 0.49; // stay above the floor (never see under the car)
 controls.autoRotate = !reduceMotion;
 controls.autoRotateSpeed = 0.5;
-// any control change requests a frame (render-on-demand, see tick())
-controls.addEventListener('change', () => { dirty = true; });
 
 // the HDRI does ~all the lighting; a faint cool rim keeps the back edge alive.
 const rim = new THREE.DirectionalLight(0xbfd0ff, 0.3);
 rim.position.set(-6, 4, -5);
 scene.add(rim);
 
-// --- glossy showroom floor: reflects the HDRI env (free — no scene re-render),
-//     reads as polished dark stone. Slightly more visible than before so it
-//     grounds the car without a literal mirror. ---
-const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(60, 64),
-  new THREE.MeshStandardMaterial({ color: 0x171a1f, roughness: 0.14, metalness: 0.9, envMapIntensity: 1.05 })
-);
-floor.rotateX(-Math.PI / 2);
-floor.renderOrder = 1;
-scene.add(floor);
+// NO separate floor mesh. The car sits directly on the GroundedSkybox's own
+// projected ground — which IS the studio floor texture (already a polished,
+// reflective-looking surface in the HDRI), so it's tone-matched by construction
+// and blends with zero seam. An opaque disc was darker than the projected floor
+// and re-introduced the exact seam we're killing; a black gloss layer would dim
+// it the same way. Grounding comes from the contact shadow below — that's it.
 
 // --- soft contact shadow under the car (grounds it; reads premium) ---
 function shadowTexture() {
@@ -101,18 +95,29 @@ contact.position.y = 0.004;
 contact.renderOrder = 2;
 scene.add(contact);
 
-// --- IBL: the exact studio HDRI used by the Cycles render ---
-// Yaw (radians) that brings the studio's big windows + winter trees behind the
-// car at the default camera view — so first load reads like the Cycles render,
-// not a blank wall. Orbiting reveals the rest of the room.
-const ENV_YAW = 3.1;
+// --- IBL + grounded backdrop: the exact studio HDRI used by the Cycles render ---
+// Yaw (radians) chosen so a furnished, warm part of the room sits behind the car
+// at the default camera view (orbiting reveals the rest). The SAME yaw is applied
+// to the lighting so reflections line up with what's visible.
+const ENV_YAW = 2.2;
+// GroundedSkybox geometry: `height` = how high the photographer's camera was
+// (bigger => the floor reads flatter/further); `radius` = dome size (camera must
+// stay inside). Tuned to the car's ~4.5 m scale; verified by screenshot below.
+const SKY_HEIGHT = 6;
+const SKY_RADIUS = 90;
 new RGBELoader().load('/model/brown_photostudio_02_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = hdr;   // lights the car + feeds reflections
-  scene.background = hdr;     // AND shows the studio scenery as the backdrop
-  scene.backgroundRotation = new THREE.Euler(0, ENV_YAW, 0);
+  scene.environment = hdr;                 // lights the car + feeds reflections
   scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
-  dirty = true;
+
+  // ground-projected studio = the visible backdrop AND a flat floor at y=0 the
+  // car sits on. One continuous space — no horizon seam.
+  const sky = new GroundedSkybox(hdr, SKY_HEIGHT, SKY_RADIUS);
+  sky.position.y = SKY_HEIGHT;             // puts the projected ground at y=0
+  sky.rotation.y = ENV_YAW;                // match the lighting yaw
+  sky.renderOrder = 0;
+  scene.add(sky);
+  scene.background = null;                  // the skybox mesh is the backdrop now
 });
 
 function frameObject(target) {
@@ -134,7 +139,6 @@ function frameObject(target) {
   controls.update();
   contact.scale.set(size.x * 1.35, size.z * 1.6, 1);
   contact.position.set(center.x, 0.004, center.z);
-  dirty = true;
 }
 
 // nudge the exported PBR toward the hero look by material name. No transmission
@@ -193,7 +197,6 @@ gltf.load(
       loaderEl.classList.add('gone');
       setTimeout(() => loaderEl.remove(), 600);
     }
-    dirty = true;
   },
   (e) => {
     if (e.lengthComputable && pctEl) pctEl.textContent = String(Math.round((e.loaded / e.total) * 100));
@@ -208,7 +211,6 @@ addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-  dirty = true;
 });
 
 // pause idle auto-rotate while dragging; resume a beat after release
@@ -216,7 +218,7 @@ let resumeT = 0;
 controls.addEventListener('start', () => { controls.autoRotate = false; clearTimeout(resumeT); });
 controls.addEventListener('end', () => {
   if (reduceMotion) return;
-  resumeT = setTimeout(() => { controls.autoRotate = true; dirty = true; }, 2500);
+  resumeT = setTimeout(() => { controls.autoRotate = true; }, 2500);
 });
 
 // device-independent per-frame cost probe (honest measure on a GPU-less box)
@@ -226,17 +228,13 @@ window.__info = () => ({
   geometries: renderer.info.memory.geometries,
 });
 
-// --- render-on-demand loop ---------------------------------------------------
-// controls.update() returns true while damping is settling or auto-rotate is on.
-// When the user isn't touching it and auto-rotate is off, it returns false and
-// we skip the draw entirely — idle frames cost nothing. rAF itself is a cheap
-// boolean check; the GPU only works when something actually moved.
+// --- continuous render loop --------------------------------------------------
+// Renders every frame, just like the home hero confirmed smooth on a phone. No
+// interaction-gating: the car, the studio backdrop and the idle auto-spin are all
+// visible the instant the page loads — nothing waits for a tap.
 function tick() {
-  const moved = controls.update();
-  if (moved || dirty) {
-    renderer.render(scene, camera);
-    dirty = false;
-  }
+  controls.update();        // damping + idle auto-rotate
+  renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
 tick();
