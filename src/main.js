@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 
 // --- JRV brand palette ---
 const JRV = {
@@ -42,8 +43,11 @@ const easeOutExpo = (t) => t === 1 ? 1 : 1 - Math.pow(2, -10 * t);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.02;
+// PBR Neutral (Khronos) instead of ACES Filmic — ACES desaturates highlights and
+// was the main reason the orange read "faded"/chalky under the bright clear sky.
+// Neutral holds the candy saturation while still rolling off the sky highlights.
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.18;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -72,7 +76,7 @@ new RGBELoader().load('model/kloofendal_43d_clear_puresky_2k.hdr', (hdr) => {
   skyEquirect = hdr;
   skyEnv = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = skyEnv;
-  scene.environmentIntensity = 1.0;
+  scene.environmentIntensity = 1.25;
   if (revealed) applySkyBackground();
 });
 
@@ -80,10 +84,10 @@ scene.background = new THREE.Color(0x20262a);   // neutral render-studio grey be
 
 function applySkyBackground() {
   if (!skyEquirect) return;
-  scene.environmentIntensity = 1.15;
+  scene.environmentIntensity = 1.35;
   scene.background = skyEquirect;
-  scene.backgroundBlurriness = 0.16;            // a little defocus on the sky — keeps the car the subject
-  scene.backgroundIntensity = 0.9;
+  scene.backgroundBlurriness = 0.08;            // less defocus → crisper reflections in the clearcoat
+  scene.backgroundIntensity = 0.95;
   scene.fog = new THREE.FogExp2(0xb8c6cf, 0.012);  // faint heat-haze down the track
 }
 
@@ -163,13 +167,32 @@ ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// wide dark tarmac apron fills the void out to the haze so we never see canvas edge
+// wide tarmac apron out to the haze — a REFLECTOR (Three.js addon) so the car body,
+// kerbs and sky mirror in the ground for a wet-track / showroom-floor gloss. The
+// reflection colour is dimmed (dark tint) and a translucent asphalt sheet rides on
+// top, so it reads as polished wet asphalt rather than a chrome mirror.
+const _dpr = Math.min(window.devicePixelRatio, 2);
+const apronMirror = new Reflector(new THREE.PlaneGeometry(200, 200), {
+  clipBias: 0.003,
+  textureWidth: Math.floor(innerWidth * _dpr),
+  textureHeight: Math.floor(innerHeight * _dpr),
+  color: 0x333b43,                      // dim the reflection → wet asphalt, not a mirror
+});
+apronMirror.rotation.x = -Math.PI / 2;
+apronMirror.position.y = -0.012;
+scene.add(apronMirror);
+
+// translucent asphalt sheet over the mirror — lets ~45% of the reflection bleed
+// through for a wet sheen while keeping a dark tarmac body.
 const apron = new THREE.Mesh(
   new THREE.PlaneGeometry(200, 200),
-  new THREE.MeshStandardMaterial({ color: 0x14171b, roughness: 0.92, metalness: 0.0, envMapIntensity: 0.5 })
+  new THREE.MeshStandardMaterial({
+    color: 0x121519, roughness: 0.5, metalness: 0.0,
+    envMapIntensity: 0.7, transparent: true, opacity: 0.55,
+  })
 );
 apron.rotation.x = -Math.PI / 2;
-apron.position.y = -0.006;
+apron.position.y = -0.008;
 apron.receiveShadow = true;
 scene.add(apron);
 
@@ -186,7 +209,7 @@ const road = new THREE.Mesh(
   new THREE.PlaneGeometry(8.6, ROAD_LEN),
   new THREE.MeshStandardMaterial({
     map: roadTex, color: 0xffffff,
-    roughness: 0.62, metalness: 0.05, envMapIntensity: 0.65,
+    roughness: 0.5, metalness: 0.08, envMapIntensity: 0.85,
   })
 );
 road.rotation.x = -Math.PI / 2;
@@ -243,13 +266,17 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
       return m;
     }
     if (/carpaint/.test(name)) {
-      // clean automotive gloss — JRV orange under a mirror clearcoat. Sharp midday
-      // sun gives a crisp hot-spot; envMap kept moderate so it doesn't blow out.
+      // proper candy-metallic automotive paint: a saturated orange metallic-flake
+      // base (high metalness tints the reflection → deep, rich body colour, not the
+      // muddy half-metal it was) under a mirror clearcoat for the wet gloss highlight.
+      // envMap pushed hard so the sky + track actually reflect in the panels.
       const p = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(JRV.orange),
-        metalness: 0.5, roughness: 0.2,
-        clearcoat: 1.0, clearcoatRoughness: 0.05,
-        envMapIntensity: 1.5,
+        color: new THREE.Color(0xff4a14),       // punchier than brand 0xF15828 — survives tonemap
+        metalness: 0.85, roughness: 0.34,
+        clearcoat: 1.0, clearcoatRoughness: 0.03,
+        envMapIntensity: 2.6,
+        specularIntensity: 1.0,
+        sheen: 0.0,
       });
       return p;
     }
@@ -565,12 +592,20 @@ const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
-// ===== pointer parallax =====
+// ===== pointer parallax + DRIFT STEERING =====
+// Hover (desktop) or touch position steers the slide: cursor left → the 911 drifts
+// left, cursor right → drifts right, centre → it tracks straight. A tap/click fires
+// a throttle burst (deeper yaw kick + a gout of extra smoke). On touch there's no
+// hover, so the tap POSITION also sets the steer direction ("drift toward my tap").
 const ptr = { x: 0, y: 0 }, ptrCur = { x: 0, y: 0 };
+let steerTarget = 0;          // -1 (full left) .. +1 (full right)
+let steerCur = 0;
+let throttle = 0;             // 0..1, decays; tap kicks it to 1
 if (!frozen) {
   addEventListener('pointermove', (e) => {
     ptr.x = (e.clientX / innerWidth) * 2 - 1;
     ptr.y = (e.clientY / innerHeight) * 2 - 1;
+    if (!dragging) steerTarget = THREE.MathUtils.clamp(ptr.x, -1, 1);
   });
 }
 
@@ -597,30 +632,48 @@ const userControl = { active: false, az: HERO.az, polar: 1.15, radius: HERO.dist
 const userTarget = { az: HERO.az, polar: 1.15 };
 const POLAR_TOP = 0.18;     // ~10° off vertical → top-down view
 const POLAR_FLOOR = 1.46;   // ~84° → just above the road, never below it
-let dragging = false, dragX = 0, dragY = 0;
+let dragging = false;       // true only once the press crosses the drag threshold
+let pressing = false, downX = 0, downY = 0, dragX = 0, dragY = 0;
+const DRAG_THRESH = 7;      // px before a press becomes a camera-orbit drag (vs a tap)
+
+function fireThrottle(clientX) {
+  // tap burst: drift toward where you tapped + a gout of smoke
+  steerTarget = THREE.MathUtils.clamp((clientX / innerWidth) * 2 - 1, -1, 1);
+  throttle = 1;
+}
 
 if (!frozen) {
   canvas.addEventListener('pointerdown', (e) => {
-    dragging = true;
-    dragX = e.clientX; dragY = e.clientY;
-    const dx = camera.position.x, dy = camera.position.y - LOOK_H, dz = camera.position.z;
-    const r = Math.max(2.5, Math.hypot(dx, dy, dz));
-    userControl.radius = r;
-    userTarget.polar = userControl.polar = THREE.MathUtils.clamp(Math.acos(dy / r), POLAR_TOP, POLAR_FLOOR);
-    userTarget.az = userControl.az = Math.atan2(dx, dz);
-    userControl.active = true;
+    pressing = true; dragging = false;
+    downX = dragX = e.clientX; downY = dragY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
+    if (!pressing) return;
+    if (!dragging) {
+      // promote to a camera-orbit drag only after real movement; below the
+      // threshold it's still a candidate tap and the hover-steer keeps working
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) < DRAG_THRESH) return;
+      dragging = true;
+      const dx = camera.position.x, dy = camera.position.y - LOOK_H, dz = camera.position.z;
+      const r = Math.max(2.5, Math.hypot(dx, dy, dz));
+      userControl.radius = r;
+      userTarget.polar = userControl.polar = THREE.MathUtils.clamp(Math.acos(dy / r), POLAR_TOP, POLAR_FLOOR);
+      userTarget.az = userControl.az = Math.atan2(dx, dz);
+      userControl.active = true;
+    }
     const dx = e.clientX - dragX, dy = e.clientY - dragY;
     dragX = e.clientX; dragY = e.clientY;
     userTarget.az -= dx * 0.005;
     userTarget.polar = THREE.MathUtils.clamp(userTarget.polar + dy * 0.005, POLAR_TOP, POLAR_FLOOR);
   });
-  const endDrag = (e) => { dragging = false; try { canvas.releasePointerCapture(e.pointerId); } catch (_) {} };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', endDrag);
+  const endPress = (e) => {
+    if (pressing && !dragging) fireThrottle(e.clientX);   // released without dragging → tap
+    pressing = false; dragging = false;
+    try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+  };
+  canvas.addEventListener('pointerup', endPress);
+  canvas.addEventListener('pointercancel', endPress);
 }
 
 // ===== loop =====
@@ -645,9 +698,15 @@ function animate() {
   else if (phase === 'drift') targetSpeed = 1;
   speedFactor += (targetSpeed - speedFactor) * Math.min(1, dt * 4);
 
-  // ---- drift attitude: car yaws ACROSS its travel line (sustained power-slide) ----
+  // ---- drift attitude: STEERED by hover/tap. steerCur leads the slide; a tap
+  // throttle-burst adds a deeper yaw kick. A faint idle weave keeps it alive when
+  // the pointer sits still / on first load. ----
+  steerCur += (steerTarget - steerCur) * Math.min(1, dt * 2.4);
+  throttle += (0 - throttle) * Math.min(1, dt * 1.3);
   const driftAmt = phase === 'drift' ? 1 : 0;
-  const targetYaw = driftAmt * (0.34 * Math.sin(t * 0.85) + 0.12 * Math.sin(t * 1.7) + 0.12);
+  const idleWeave = 0.07 * Math.sin(t * 0.6) + 0.04 * Math.sin(t * 1.3);
+  const kick = throttle * (steerCur >= 0 ? 1 : -1) * 0.2;
+  const targetYaw = driftAmt * (steerCur * 0.5 + idleWeave + kick);
   driftYaw += (targetYaw - driftYaw) * Math.min(1, dt * 3);
 
   // ---- camera state machine ----
@@ -695,9 +754,9 @@ function animate() {
   } else if (!reduceMotion) {
     // DRIFT tracking shot — a low front-3/4 that weaves a touch while the track rushes
     // underneath and the car slides. No full turntable spin — it's a chase, not a spin.
-    RIG.az = HERO.az + Math.sin(t * 0.18) * 0.5 + Math.sin(t * 0.43) * 0.08;
+    RIG.az = HERO.az + Math.sin(t * 0.18) * 0.4 + Math.sin(t * 0.43) * 0.08 - steerCur * 0.32;
     RIG.el = HERO.el - 0.06 + Math.sin(t * 0.27) * 0.05;
-    RIG.dist = HERO.dist + 0.2 + Math.sin(t * 0.12) * 0.4;
+    RIG.dist = HERO.dist + 0.2 + Math.sin(t * 0.12) * 0.4 - throttle * 0.3;   // tap punches in slightly
     rigToPos(RIG.az, RIG.el, RIG.dist, _camPos);
     camera.position.copy(_camPos);
     camera.lookAt(0, LOOK_H + Math.sin(t * 7.0) * 0.01, 0);
@@ -756,7 +815,9 @@ function animate() {
       }
     }
     smokeAccum += dt; burnAccum += dt;
-    const sStep = 1 / 26, bStep = 1 / 60;
+    // denser smoke the harder it slides + on a throttle burst
+    const slip = Math.min(1, Math.abs(driftYaw) / 0.5 + throttle * 0.7);
+    const sStep = 1 / (16 + slip * 30), bStep = 1 / 60;
     while (smokeAccum >= sStep) {
       smokeAccum -= sStep;
       for (const rw of rearWheels) { rw.getWorldPosition(_wp); emitSmoke(_wp.x, 0.08, _wp.z, _back, _lat); }
@@ -787,6 +848,8 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
   bloom.setSize(innerWidth, innerHeight);
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  apronMirror.getRenderTarget().setSize(Math.floor(innerWidth * dpr), Math.floor(innerHeight * dpr));
 });
 renderer.setSize(innerWidth, innerHeight);
 composer.setSize(innerWidth, innerHeight);
