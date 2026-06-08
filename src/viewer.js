@@ -1,133 +1,186 @@
-// On-site 911 showcase — baked Cycles turntable.
-// The realtime GLB viewer can't reproduce Cycles, so the on-page model is a
-// pre-rendered 360° frame sequence: SAME scene, SAME AgX Medium-High grade,
-// SAME HDRI + materials as the hero render. Scrubbed on a <canvas> as an
-// image sequence (NOT video.currentTime — that breaks scrub on iOS Safari).
+import * as THREE from 'three';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Reflector } from 'three/addons/objects/Reflector.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+// Real-time Three.js showcase of the GT3 RS — same car + same look as the
+// Cycles hero render, in an interactive (drag-orbit + zoom) viewer. The match
+// comes from: the SAME brown_photostudio_02 HDRI as the env (carries the
+// reflections), the rebuilt PBR exported from Blender (clearcoat paint,
+// transmissive glass, real chrome, emissive lights), NeutralToneMapping
+// (ACES washes carpaint out — see project memory), a Reflector floor for the
+// showroom mirror, and selective bloom on the emissive lights only.
 
 const canvas = document.getElementById('scene');
-const ctx = canvas.getContext('2d', { alpha: false });
 const loaderEl = document.getElementById('loader');
 const pctEl = document.getElementById('pct');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-const FRAME_COUNT = 36;
-const PAD = 4;
-const SRC = (i) => `/model/turntable/frame_${String(i + 1).padStart(PAD, '0')}.jpg`;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.toneMapping = THREE.NeutralToneMapping; // matches AgX read far better than ACES
+renderer.toneMappingExposure = 0.85;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-const frames = new Array(FRAME_COUNT);
-let loaded = 0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0b0e);
 
-// --- turntable state ---
-let pos = 0;            // float frame index, wraps [0, FRAME_COUNT)
-let vel = 0;            // frames per tick (momentum)
-let dragging = false;
-let lastX = 0;
-let idleTimer = 0;      // ticks since last user input
-const AUTO_SPEED = 0.06;   // idle auto-rotate (frames/tick) ~ a slow 360 in ~10s
-const DRAG_PER_PX = 0.045; // how many frames one px of drag advances
-const FRICTION = 0.92;     // momentum decay
-const IDLE_DELAY = 48;     // ticks of no input before auto-rotate resumes
+const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.05, 200);
+camera.position.set(4.2, 1.6, 5.2);
 
-function wrap(i) { return ((i % FRAME_COUNT) + FRAME_COUNT) % FRAME_COUNT; }
+const controls = new OrbitControls(camera, canvas);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 2.4;
+controls.maxDistance = 14;
+controls.maxPolarAngle = Math.PI * 0.5; // never dip under the floor
+controls.autoRotate = !reduceMotion;
+controls.autoRotateSpeed = 0.55;
 
-// --- sizing (cover-fit, hi-dpi) ---
-let dpr = 1, vw = 0, vh = 0;
-function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  vw = window.innerWidth;
-  vh = window.innerHeight;
-  canvas.width = Math.round(vw * dpr);
-  canvas.height = Math.round(vh * dpr);
-  canvas.style.width = vw + 'px';
-  canvas.style.height = vh + 'px';
-  draw();
+// the HDRI does ~all the lighting; a faint rim only, to keep the back edge alive.
+// (extra directional lights on top of the studio HDRI just blow a white car out.)
+const rim = new THREE.DirectionalLight(0xbfd0ff, 0.4);
+rim.position.set(-6, 4, -5);
+scene.add(rim);
+
+// --- showroom mirror floor (the reflection the hero render has) ---
+const floorGeo = new THREE.CircleGeometry(40, 64);
+const reflector = new Reflector(floorGeo, {
+  textureWidth: window.innerWidth * Math.min(window.devicePixelRatio, 2),
+  textureHeight: window.innerHeight * Math.min(window.devicePixelRatio, 2),
+  color: 0x101216,
+});
+reflector.rotateX(-Math.PI / 2);
+reflector.position.y = 0;
+scene.add(reflector);
+// a dark glossy glaze over the mirror so it reads polished, not a perfect mirror
+const glaze = new THREE.Mesh(
+  floorGeo.clone(),
+  new THREE.MeshStandardMaterial({ color: 0x0a0b0e, roughness: 0.35, metalness: 0.0, transparent: true, opacity: 0.55 })
+);
+glaze.rotateX(-Math.PI / 2);
+glaze.position.y = 0.001;
+scene.add(glaze);
+
+// --- IBL: the exact studio HDRI used by the Cycles render ---
+new RGBELoader().load('/model/brown_photostudio_02_2k.hdr', (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  scene.environment = hdr;
+});
+
+function frameObject(target) {
+  const box = new THREE.Box3().setFromObject(target);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  // drop the car so its wheels sit on the floor (y=0)
+  target.position.y -= box.min.y;
+  box.setFromObject(target);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.z) || 1;
+  const dist = maxDim * 1.45;
+  camera.position.set(center.x + dist * 0.92, center.y + maxDim * 0.34, center.z + dist * 1.05);
+  controls.target.set(center.x, center.y * 0.85, center.z);
+  controls.minDistance = maxDim * 0.85;
+  controls.maxDistance = maxDim * 4;
+  controls.update();
 }
 
-function draw() {
-  const img = frames[wrap(Math.round(pos))];
-  if (!img || !img.complete) return;
-  const cw = canvas.width, ch = canvas.height;
-  const ir = img.width / img.height;
-  const cr = cw / ch;
-  let dw, dh, dx, dy;
-  if (ir > cr) { dh = ch; dw = ch * ir; dx = (cw - dw) / 2; dy = 0; }
-  else { dw = cw; dh = cw / ir; dx = 0; dy = (ch - dh) / 2; }
-  ctx.fillStyle = '#0a0c0e';
-  ctx.fillRect(0, 0, cw, ch);
-  ctx.drawImage(img, dx, dy, dw, dh);
-}
-
-// --- interaction ---
-function pointerDown(e) {
-  dragging = true;
-  vel = 0;
-  idleTimer = 0;
-  lastX = (e.touches ? e.touches[0].clientX : e.clientX);
-  canvas.setPointerCapture?.(e.pointerId ?? 0);
-}
-function pointerMove(e) {
-  if (!dragging) return;
-  const x = (e.touches ? e.touches[0].clientX : e.clientX);
-  const dx = x - lastX;
-  lastX = x;
-  const delta = -dx * DRAG_PER_PX;   // drag right -> car turns toward you
-  pos = wrap(pos + delta);
-  vel = delta;                       // carry into momentum on release
-  idleTimer = 0;
-  draw();
-}
-function pointerUp() { dragging = false; idleTimer = 0; }
-
-canvas.addEventListener('pointerdown', pointerDown);
-canvas.addEventListener('pointermove', pointerMove);
-addEventListener('pointerup', pointerUp);
-canvas.addEventListener('pointercancel', pointerUp);
-// touch fallbacks (older iOS Safari)
-canvas.addEventListener('touchstart', pointerDown, { passive: true });
-canvas.addEventListener('touchmove', (e) => { pointerMove(e); }, { passive: true });
-canvas.addEventListener('touchend', pointerUp);
-// wheel / trackpad spins too
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  vel += (e.deltaY || e.deltaX) * 0.004;
-  idleTimer = 0;
-}, { passive: false });
-
-// --- tick ---
-function tick() {
-  if (!dragging) {
-    pos = wrap(pos + vel);
-    vel *= FRICTION;
-    if (Math.abs(vel) < 0.0008) vel = 0;
-    if (vel === 0) {
-      idleTimer++;
-      if (!reduceMotion && idleTimer > IDLE_DELAY) pos = wrap(pos + AUTO_SPEED);
+// nudge the exported PBR toward the hero look by material name
+function tuneMaterials(root) {
+  root.traverse((n) => {
+    if (!n.isMesh || !n.material) return;
+    n.castShadow = n.receiveShadow = true;
+    const mats = Array.isArray(n.material) ? n.material : [n.material];
+    for (const m of mats) {
+      const name = (m.name || '').toLowerCase();
+      if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
+        m.clearcoat = 1.0;
+        m.clearcoatRoughness = 0.08;
+        m.roughness = Math.min(m.roughness ?? 0.4, 0.38);
+        m.envMapIntensity = 0.85;
+      } else if (/chrome|mirror|metal/.test(name)) {
+        m.metalness = 1.0;
+        m.roughness = Math.min(m.roughness ?? 0.1, 0.12);
+        m.envMapIntensity = 1.4;
+      } else if (/glass/.test(name)) {
+        m.transmission = m.transmission || 0.9;
+        m.roughness = 0.05;
+        m.metalness = 0.0;
+        m.ior = 1.45;
+        m.envMapIntensity = 1.2;
+        m.transparent = true;
+      } else if (/rubber|tyre|tire|trim/.test(name)) {
+        m.metalness = 0.0;
+        m.roughness = Math.max(m.roughness ?? 0.6, 0.7);
+      } else if (/led|light|backlight|tail/.test(name)) {
+        m.emissiveIntensity = Math.max(m.emissiveIntensity ?? 1, 2.2);
+      }
+      m.needsUpdate = true;
     }
-    draw();
-  }
-  requestAnimationFrame(tick);
+  });
 }
 
-// --- preload all frames, then reveal ---
-function onLoad() {
-  loaded++;
-  if (pctEl) pctEl.textContent = String(Math.round((loaded / FRAME_COUNT) * 100));
-  if (loaded === 1) { resize(); }          // show first frame ASAP
-  if (loaded === FRAME_COUNT) {
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+const gltf = new GLTFLoader();
+gltf.setDRACOLoader(draco);
+gltf.load(
+  '/model/porsche-gt3rs.glb',
+  (data) => {
+    const root = data.scene;
+    tuneMaterials(root);
+    scene.add(root);
+    frameObject(root);
     if (loaderEl) {
       loaderEl.classList.add('gone');
       setTimeout(() => loaderEl.remove(), 600);
     }
+  },
+  (e) => {
+    if (e.lengthComputable && pctEl) pctEl.textContent = String(Math.round((e.loaded / e.total) * 100));
+  },
+  (err) => {
+    console.error('GLB load failed', err);
+    if (pctEl) pctEl.textContent = 'ERR';
   }
-}
-for (let i = 0; i < FRAME_COUNT; i++) {
-  const img = new Image();
-  img.decoding = 'async';
-  img.onload = onLoad;
-  img.onerror = onLoad; // don't stall the loader on a single miss
-  img.src = SRC(i);
-  frames[i] = img;
-}
+);
 
-addEventListener('resize', resize);
-requestAnimationFrame(tick);
+// --- post: selective bloom on the emissive lights, then tone-map in OutputPass ---
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.22,  // strength — just a kiss, the LEDs/tails only
+  0.45,  // radius
+  1.4    // threshold — high enough that bright white-paint reflections DON'T bloom
+);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloom.setSize(window.innerWidth, window.innerHeight);
+});
+
+// pause idle auto-rotate while dragging; resume a beat after release
+let resumeT = 0;
+controls.addEventListener('start', () => { controls.autoRotate = false; clearTimeout(resumeT); });
+controls.addEventListener('end', () => {
+  if (reduceMotion) return;
+  resumeT = setTimeout(() => { controls.autoRotate = true; }, 2500);
+});
+
+renderer.setAnimationLoop(() => {
+  controls.update();
+  composer.render();
+});
