@@ -37,11 +37,14 @@ linear speed**, so the rims roll instead of sliding.
 - **Sunny racetrack:** lit + backed by the **Poly Haven Kloofendal 43d Clear (Pure Sky)**
   HDRI (clear midday, CC0) — a hard warm sun key + cool sky fill, faint heat-haze fog. The
   track is kerbed tarmac (red/white curbing + a worn racing line) that scrolls underneath.
-- **Drag to steer:** grab the scene (mouse **or** touch) to orbit the camera —
-  left↔right full circle, tilt from a near top-down down to just above the road, **clamped
-  so it never dips below the tarmac**.
-- **Glossy clearcoat:** `MeshPhysicalMaterial` JRV-orange base under a mirror clearcoat;
-  sharp midday sun gives a crisp hot-spot. Tyres forced matte black, rims machined graphite.
+- **Hover / tap to steer the slide:** cursor (or touch) X position steers the drift —
+  left → the 911 slides left, right → slides right, centre → tracks straight. A **tap/click
+  fires a throttle burst** (deeper yaw kick + a gout of extra smoke). Press-and-**drag still
+  orbits the camera** (threshold-gated so a tap doesn't trigger orbit), polar-clamped so it
+  never dips below the tarmac.
+- **Glossy candy clearcoat:** `MeshPhysicalMaterial` candy-metallic JRV-orange base
+  (`metalness 0.85`) under a mirror clearcoat; PBR-Neutral tonemapping keeps it saturated
+  (ACES was washing it out). Tyres forced matte black, rims machined graphite.
 - **Live energy:** headlights breathe (emissive + bloom), `HEADING nnn°` HUD reads the
   orbit angle.
 - **Reduced-motion:** skips the reveal + drift entirely — a static lit hero 3/4.
@@ -52,21 +55,22 @@ linear speed**, so the rims roll instead of sliding.
 |-------|--------|
 | 3D engine | **Three.js** `^0.171` (vanilla, ES modules) |
 | Build | **Vite** `^5` |
-| Rendering | WebGL, `ACESFilmicToneMapping` (exposure 1.02) + `SRGBColorSpace`, `PCFSoftShadowMap` |
+| Rendering | WebGL, `NeutralToneMapping` (Khronos PBR Neutral, exposure 1.18 — keeps the candy orange saturated where ACES washed it out) + `SRGBColorSpace`, `PCFSoftShadowMap` |
 | Lighting | **IBL** via **Poly Haven `kloofendal_43d_clear_puresky` HDRI** (`RGBELoader` → `PMREMGenerator`) — clear-sky reflections; hard warm **sun** key (shadow caster) + cool sky fill + back rim + low front fill (for drag-around) + one JRV-orange accent kiss |
-| Environment | HDRI as **lightly-blurred sky backdrop** (`backgroundBlurriness 0.16`, `backgroundIntensity 0.9`) + faint `FogExp2(#b8c6cf, 0.012)` heat-haze |
+| Environment | HDRI as **lightly-blurred sky backdrop** (`backgroundBlurriness 0.08` — crisper clearcoat reflections, `backgroundIntensity 0.95`, `environmentIntensity 1.35`) + faint `FogExp2(#b8c6cf, 0.012)` heat-haze |
 | Track | kerbed tarmac `CanvasTexture` (asphalt speckle + worn racing line + red/white kerbs + limit lines), `RepeatWrapping` scrolled via `offset.y` |
-| Body material | `MeshPhysicalMaterial` — JRV-orange base, `clearcoat 1`, `clearcoatRoughness 0.05`, `envMapIntensity 1.5` |
+| Body material | `MeshPhysicalMaterial` candy-metallic — punchy orange base, `metalness 0.85`, `roughness 0.34`, `clearcoat 1`, `clearcoatRoughness 0.03`, `envMapIntensity 2.6` (high metalness tints the reflection → rich body colour, not the muddy half-metal it was) |
 | Reveal | state machine `load → detail → pull → drift`; real PBR from frame 0 (the rim study needs detail); `easeOutCubic` counter; white flash on snap |
 | Motion model | one linear speed `V_MAX` ramps via `speedFactor`; drives **both** `roadTex.offset` (`V / units-per-tile`) and wheel spin (`ω = V / WHEEL_R`) — locked, no sliding |
-| Drift | car yaws across a **fixed** `travelDirBase`; `driftYaw` oscillation + counter-roll; smoke/marks read off the fixed travel axis, not live yaw |
+| Drift | car yaws across a **fixed** `travelDirBase`; `driftYaw` driven by `steerCur` (hover/tap) + a faint idle weave + throttle kick + counter-roll; smoke/marks read off the fixed travel axis, not live yaw |
+| Interaction | hover/touch X → `steerTarget` (smoothed `steerCur`) steers the slide; tap → `throttle` burst (denser smoke + yaw kick); drag past a 7px threshold → camera orbit |
 | Smoke | 240-sprite pool, soft greyscale puff, emitted off the rear hubs with back + lateral velocity + buoyancy |
 | Burn marks | 340 flat decal quads laid at the rear contact points, aligned to travel, **receding with the track**, fading over ~2s — overlap → continuous rubber line |
-| Camera | drift tracking weave (az/el/dist) + **pointer-event drag-orbit** with polar clamp (`0.18 … 1.46` rad) |
+| Camera | drift tracking weave (az/el/dist, leans into `steerCur`) + **pointer-event drag-orbit** with polar clamp (`0.18 … 1.46` rad) |
 | Geometry | Sketchfab GLB → `gltf-transform optimize` (Draco geometry + WebP textures) → **2.7 MB** |
 | Loading | `GLTFLoader` + `DRACOLoader` (gstatic decoder) |
 | Post | `EffectComposer` → `UnrealBloomPass` (0.24 / 0.55 / 0.9) → `OutputPass` |
-| Grounding | sun cast shadow (`ShadowMaterial`) + dark tarmac apron + a radial **blob contact shadow** parented to the car |
+| Grounding | sun cast shadow (`ShadowMaterial`) + **`Reflector` wet-tarmac mirror apron** (three.js addon, dimmed reflection under a translucent asphalt sheet → car/sky mirror in the ground) + a radial **blob contact shadow** parented to the car |
 | Host | Vercel (static `dist/`) |
 
 ## Design system (shared with ORI — `src/tokens.css`)
