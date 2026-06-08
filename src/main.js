@@ -534,7 +534,7 @@ function makeBurnTexture() {
 }
 
 // ===== smoke pool — billboard sprites trailing off the rear wheels =====
-const SMOKE_N = 240;
+const SMOKE_N = 340;
 const smokeTex = makeSmokeTexture();
 const smokeSprites = [];
 const smokeState = [];
@@ -586,7 +586,7 @@ let smokeAccum = 0;
 // ===== burn-mark pool — flat decals laid at the rear contact points, receding with
 // the track (so they read as rubber laid down on the tarmac as the car slides). The
 // rear wheels sweep side-to-side as the car yaws → the trail snakes like a real drift.
-const BURN_N = 340;
+const BURN_N = 720;
 const burnTex = makeBurnTexture();
 const burnGeo = new THREE.PlaneGeometry(1, 1);
 const burnMeshes = [];
@@ -605,14 +605,14 @@ for (let i = 0; i < BURN_N; i++) {
 }
 let burnCursor = 0;
 const _burnYaw = () => Math.atan2(travelDirBase.x, travelDirBase.z);
-function emitBurn(px, pz) {
+function emitBurn(px, pz, yaw) {
   const st = burnState[burnCursor], m = burnMeshes[burnCursor];
   burnCursor = (burnCursor + 1) % BURN_N;
-  st.active = true; st.life = 0; st.max = 2.0 + Math.random() * 0.5;
+  st.active = true; st.life = 0; st.max = 5.5 + Math.random() * 1.5;   // long-lived → the donut ring holds
   st.peak = 0.5 + Math.random() * 0.18;
   m.position.set(px + (Math.random() - 0.5) * 0.05, 0.014, pz);
-  m.rotation.z = _burnYaw();                 // align the streak down the travel line
-  m.scale.set(0.4, 0.95, 1);                 // tyre-width × an overlapping segment → continuous line
+  m.rotation.z = (yaw ?? _burnYaw());        // align the streak along the donut tangent
+  m.scale.set(0.42, 0.78, 1);                // tyre-width × an overlapping segment → continuous ring
   m.material.opacity = st.peak;
   m.visible = true;
 }
@@ -813,7 +813,10 @@ const _back = new THREE.Vector3();
 const _lat = new THREE.Vector3();
 const _recede = new THREE.Vector3();
 const _wp = new THREE.Vector3();
+const _out = new THREE.Vector3();      // outward (car-centre → rear wheel), for smoke billow
+const _tan = new THREE.Vector3();      // tangent to the donut circle, for mark streak + swirl
 let driftYaw = 0;
+let driftSpin = 0;                     // continuous donut rotation (rad) accumulated in drift
 
 function animate() {
   requestAnimationFrame(animate);
@@ -883,32 +886,43 @@ function animate() {
     camera.position.copy(_camPos);
     camera.lookAt(0, LOOK_H, 0);
   } else if (!reduceMotion) {
-    // DRIFT tracking shot — a low front-3/4 that weaves a touch while the track rushes
-    // underneath and the car slides. No full turntable spin — it's a chase, not a spin.
-    RIG.az = HERO.az + Math.sin(t * 0.18) * 0.4 + Math.sin(t * 0.43) * 0.08 - steerCur * 0.32;
-    RIG.el = HERO.el - 0.06 + Math.sin(t * 0.27) * 0.05;
-    RIG.dist = HERO.dist + 0.2 + Math.sin(t * 0.12) * 0.4 - throttle * 0.3;   // tap punches in slightly
+    // DRONE ORBIT — the reel's signature: an FPV drone circles the donut continuously
+    // (rear → side → front → rear), low to the ground and close, with a faint handheld
+    // bob. The az accumulates with t so it's a true fly-around, not a fixed weave. A tap
+    // speeds the orbit + punches in; hover nudges it a touch.
+    const orbitSpeed = 0.40 + throttle * 0.55;
+    RIG.az = HERO.az + t * orbitSpeed + Math.sin(t * 0.7) * 0.06 - steerCur * 0.18;
+    RIG.el = HERO.el - 0.14 + Math.sin(t * 0.5) * 0.06;                       // low drone, gentle bob
+    RIG.dist = HERO.dist + 0.1 + Math.sin(t * 0.23) * 0.5 - throttle * 0.45;  // breathes in/out, tap punches in
     rigToPos(RIG.az, RIG.el, RIG.dist, _camPos);
     camera.position.copy(_camPos);
-    camera.lookAt(0, LOOK_H + Math.sin(t * 7.0) * 0.01, 0);
+    camera.lookAt(0, LOOK_H + Math.sin(t * 6.0) * 0.008, 0);
   } else {
     rigToPos(HERO.az, HERO.el, HERO.dist, _camPos);
     camera.position.copy(_camPos);
     camera.lookAt(0, LOOK_H, 0);
   }
 
-  // ---- car attitude (drift yaw + suspension load) ----
+  // ---- car attitude — DONUT: the car spins continuously in place (rear wheels trace a
+  // circle), leaning out of the slide. During 'pull' it's still straight (donut=0). ----
   const moving = (phase === 'drift' || phase === 'pull') && !reduceMotion;
   if (moving) {
-    carRoot.rotation.y = BASE_YAW + driftYaw;
+    const donut = phase === 'drift' ? 1 : 0;
+    const spinRate = 0.85 + throttle * 0.85;          // rad/s, tap accelerates the donut
+    driftSpin += donut * spinRate * dt;
+    carRoot.rotation.y = BASE_YAW + driftSpin + Math.sin(t * 5.5) * 0.008;
     carRoot.position.y = Math.sin(t * 7.3) * 0.012 * speedFactor + Math.sin(t * 11.7) * 0.006 * speedFactor;
-    carRoot.rotation.z = -driftYaw * 0.18 + Math.sin(t * 5.5) * 0.005;   // weight rolls out of the slide
+    carRoot.rotation.z = donut * 0.045 + Math.sin(t * 5.5) * 0.005;   // leans out of the donut
     carRoot.rotation.x = Math.sin(t * 6.3) * 0.004;
   } else {
     carRoot.rotation.y = BASE_YAW;
     carRoot.position.y = 0;
     carRoot.rotation.z = 0; carRoot.rotation.x = 0;
   }
+
+  // open lot: hide the kerbed race-track strip once the donut starts (the reel has no
+  // rushing road — just an open concrete pad with scorched circles).
+  roadGroup.visible = phase !== 'drift';
 
   // ---- scroll the track + spin wheels — LOCKED to one linear speed (no sliding) ----
   if (carModel && !reduceMotion) {
@@ -921,42 +935,55 @@ function animate() {
     }
   }
 
-  // ---- tyre smoke + burn marks off the rear wheels (drift) ----
-  _back.copy(travelDirBase).multiplyScalar(-1);          // straight back down the track
-  _lat.set(-travelDirBase.z, 0, travelDirBase.x).multiplyScalar(driftYaw * 2.2);  // sideways kick from the slide
-  _recede.copy(travelDirBase).multiplyScalar(-V_MAX * speedFactor);               // marks recede with the track
+  // ---- tyre smoke + burn marks off the rear wheels (DONUT) ----
+  // The lot is static (no track rush), so laid rubber STAYS where it's put → the rear
+  // wheels, tracing a circle as the car spins, scorch a continuous donut ring. Smoke
+  // billows outward from the donut centre + rises (per-wheel direction set at emit time).
+  _recede.set(0, 0, 0);                                  // static ground — marks don't slide
+
+  // per-rear-wheel direction helpers: billow OUTWARD from the donut centre (scene origin)
+  // + rise; ring marks STREAK along the circle tangent so they read as one laid ring.
+  const emitSmokeRears = () => {
+    for (const rw of rearWheels) {
+      rw.getWorldPosition(_wp);
+      _out.set(_wp.x, 0, _wp.z);
+      if (_out.lengthSq() > 1e-4) _out.normalize(); else _out.set(0, 0, 1);
+      _tan.set(-_out.z, 0, _out.x);
+      emitSmoke(_wp.x, 0.08, _wp.z, _out, _tan);          // outward push + tangential swirl
+    }
+  };
+  const emitBurnRears = () => {
+    for (const rw of rearWheels) {
+      rw.getWorldPosition(_wp);
+      _out.set(_wp.x, 0, _wp.z);
+      if (_out.lengthSq() > 1e-4) _out.normalize(); else _out.set(0, 0, 1);
+      emitBurn(_wp.x, _wp.z, Math.atan2(-_out.z, _out.x));  // streak along the circle tangent
+    }
+  };
 
   if (phase === 'drift' && rearWheels.length) {
-    // frozen screenshots: headless throttles rAF, so pre-simulate a few seconds of
-    // trail in one frame so the still already shows the plume + laid rubber.
+    // frozen screenshots: headless throttles rAF, so pre-simulate a chunk of the donut in
+    // one frame so the still already shows the ring of rubber + the plume.
     if (frozen && !seededAction) {
       seededAction = true;
-      const sStep = 1 / 18, bStep = 1 / 60;
+      const sStep = 1 / 18, bStep = 1 / 55;
       let sa = 0, ba = 0;
-      for (let kf = 0; kf < 95; kf++) {
-        const tt = kf * 0.02;
-        const dyaw = 0.34 * Math.sin(tt * 0.85) + 0.12 * Math.sin(tt * 1.7) + 0.12;
-        carRoot.rotation.y = BASE_YAW + dyaw;
+      for (let kf = 0; kf < 150; kf++) {
+        carRoot.rotation.y = BASE_YAW + kf * 0.02 * 1.7;  // sweep ~2.9 rad of the donut
+        carRoot.rotation.z = 0.045;
         carRoot.updateMatrixWorld(true);
-        _lat.set(-travelDirBase.z, 0, travelDirBase.x).multiplyScalar(dyaw * 2.2);
         sa += 0.02; ba += 0.02;
-        while (sa >= sStep) { sa -= sStep; for (const rw of rearWheels) { rw.getWorldPosition(_wp); emitSmoke(_wp.x, 0.08, _wp.z, _back, _lat); } }
-        while (ba >= bStep) { ba -= bStep; for (const rw of rearWheels) { rw.getWorldPosition(_wp); emitBurn(_wp.x, _wp.z); } }
+        while (sa >= sStep) { sa -= sStep; emitSmokeRears(); }
+        while (ba >= bStep) { ba -= bStep; emitBurnRears(); }
         updateSmoke(0.02); updateBurn(0.02, _recede);
       }
     }
     smokeAccum += dt; burnAccum += dt;
-    // denser smoke the harder it slides + on a throttle burst
-    const slip = Math.min(1, Math.abs(driftYaw) / 0.5 + throttle * 0.7);
-    const sStep = 1 / (16 + slip * 30), bStep = 1 / 60;
-    while (smokeAccum >= sStep) {
-      smokeAccum -= sStep;
-      for (const rw of rearWheels) { rw.getWorldPosition(_wp); emitSmoke(_wp.x, 0.08, _wp.z, _back, _lat); }
-    }
-    while (burnAccum >= bStep) {
-      burnAccum -= bStep;
-      for (const rw of rearWheels) { rw.getWorldPosition(_wp); emitBurn(_wp.x, _wp.z); }
-    }
+    // denser smoke the harder it's spinning + on a throttle burst
+    const slip = Math.min(1, 0.6 + throttle * 0.7);
+    const sStep = 1 / (16 + slip * 30), bStep = 1 / 45;
+    while (smokeAccum >= sStep) { smokeAccum -= sStep; emitSmokeRears(); }
+    while (burnAccum >= bStep) { burnAccum -= bStep; emitBurnRears(); }
   }
   updateSmoke(dt);
   updateBurn(dt, _recede);
