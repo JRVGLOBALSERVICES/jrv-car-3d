@@ -1,0 +1,88 @@
+:root {
+  /* JRV brand (hex source of truth) */
+  --jrv-orange: #f15828;
+  --jrv-mint: #00ff88;
+
+  /* page chrome (OKLCH, atmospheric dark) */
+  --color-bg: oklch(14% 0.03 264);
+  --color-bg-2: oklch(9% 0.02 264);
+  --color-ink: oklch(96% 0.012 80);
+  --color-ink-dim: oklch(72% 0.012 80 / 0.66);
+  --color-accent: oklch(64% 0.19 38); /* JRV orange */
+  --color-glow: oklch(88% 0.24 158); /* mint glow */
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --space-md: 16px;
+  --space-lg: 32px;
+  --space-xl: 64px;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; background: var(--color-bg); }
+body {
+  font-family: var(--font-display), system-ui, sans-serif;
+  color: var(--color-ink);
+  background: radial-gradient(120% 90% at 50% 8%, var(--color-bg) 0%, var(--color-bg-2) 72%);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+
+/* full-screen fixed canvas behind the chrome */
+.stage { position: fixed; inset: 0; z-index: 0; }
+.stage canvas { display: block; touch-action: none; }
+
+/* chrome overlay — pointer-events pass through except on links */
+.chrome { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
+.chrome a, .chrome button { pointer-events: auto; }
+
+.brand { position: absolute; top: var(--space-lg); left: var(--space-lg); display: flex; align-items: baseline; gap: 10px; }
+.brand .mark { font-weight: 700; font-size: 22px; letter-spacing: -0.02em; }
+.brand .mark b { color: var(--color-accent); }
+.brand .sub {
+  font-family: var(--font-mono), monospace; font-size: 11px; letter-spacing: 0.28em;
+  text-transform: uppercase; color: var(--color-ink-dim);
+}
+
+.nav { position: absolute; top: var(--space-lg); right: var(--space-lg); display: flex; gap: 18px;
+  font-family: var(--font-mono), monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; }
+.nav a { color: var(--color-ink-dim); text-decoration: none; transition: color 0.2s var(--ease-out); }
+.nav a:hover, .nav a[aria-current="page"] { color: var(--color-ink); }
+.nav a[aria-current="page"] { color: var(--color-accent); }
+
+.hero { position: absolute; left: var(--space-lg); bottom: var(--space-xl); max-width: min(560px, 82vw); }
+.hero .tag {
+  font-family: var(--font-mono), monospace; font-size: 11px; letter-spacing: 0.28em;
+  text-transform: uppercase; color: var(--color-ink-dim); margin-bottom: 14px;
+}
+.hero h1 { font-size: clamp(44px, min(9vw, 13vh), 108px); font-weight: 700; line-height: 0.9;
+  letter-spacing: -0.035em; }
+.hero h1 em { font-style: normal; color: var(--color-accent); }
+.hero p { margin-top: var(--space-md); font-family: var(--font-mono), monospace; font-size: 13px;
+  line-height: 1.65; color: var(--color-ink-dim); max-width: 46ch; }
+
+.cue { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+  font-family: var(--font-mono), monospace; font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase;
+  color: var(--color-ink-dim); display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.cue .line { width: 1px; height: 34px; background: linear-gradient(var(--color-glow), transparent);
+  animation: cuepulse 2.2s var(--ease-out) infinite; }
+@keyframes cuepulse { 0%, 100% { opacity: 0.3; transform: scaleY(0.7); } 50% { opacity: 1; transform: scaleY(1); } }
+
+.hint { position: absolute; right: var(--space-lg); bottom: var(--space-xl);
+  font-family: var(--font-mono), monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-ink-dim); text-align: right; line-height: 2; }
+.hint .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-glow); margin-right: 8px; vertical-align: middle; box-shadow: 0 0 10px var(--color-glow); }
+
+.credit { position: absolute; left: 50%; transform: translateX(-50%); bottom: 6px;
+  font-family: var(--font-mono), monospace; font-size: 10px; letter-spacing: 0.05em;
+  color: var(--color-ink-dim); opacity: 0.5; text-align: center; max-width: 92vw; }
+
+@media (max-width: 720px) {
+  .brand, .hero { left: var(--space-md); }
+  .brand { top: var(--space-md); }
+  .nav { top: var(--space-md); right: var(--space-md); gap: 12px; }
+  .hero { bottom: 120px; }
+  .hint { display: none; }
+  .credit { font-size: 9px; bottom: 4px; }
+}
+@media (prefers-reduced-motion: reduce) { .cue .line { animation: none; } }
