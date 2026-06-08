@@ -12,7 +12,13 @@ This work is based on "(FREE) Porsche 911 Carrera 4S" (https://sketchfab.com/3d-
 
 ---
 
-HDRI Environment:
+HDRI Environment (current — hazy-daylight grade):
+* title:	Kloofendal 43d Clear (Pure Sky)
+* source:	https://polyhaven.com/a/kloofendal_43d_clear_puresky
+* license:	CC0 (public domain) — attribution appreciated, not required
+* used for:	clear-daytime image-based lighting + hazy daylight backdrop (NFS reel grade)
+
+HDRI Environment (previous — retained for the dusk look):
 * title:	Belfast Sunset (Pure Sky)
 * source:	https://polyhaven.com/a/belfast_sunset_puresky
 * license:	CC0 (public domain) — attribution appreciated, not required
