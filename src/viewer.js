@@ -334,6 +334,20 @@ function frameObject(target) {
   contact.position.set(center.x, 0.004, center.z);
 }
 
+// The reel shots are authored as offsets scaled by the car radius, with a fixed
+// *vertical* FOV tuned for a wide desktop frame. On a portrait phone that same
+// vertical FOV gives a very narrow *horizontal* coverage, so the car overflows
+// the sides and reads "huge". Pull every shot back by an aspect-driven factor —
+// identical composition, just more breathing room — with zero lens distortion.
+const REEL_REF_ASPECT = 1.5;
+function reelFitScale() {
+  const aspect = window.innerWidth / window.innerHeight;
+  return aspect >= REEL_REF_ASPECT ? 1 : Math.min(REEL_REF_ASPECT / aspect, 2.1);
+}
+// base framing captured at load, so we can re-frame on an orientation flip
+let fitCenter = null;
+let fitRadius = 1;
+
 // collect light materials for the emissive beats (verified names from the GLB)
 const headMats = [];   // headlights + DRL (cool white)
 const tailMats = [];   // tail + brake (red)
@@ -655,7 +669,8 @@ gltf.load(
     cam.tx = controls.target.x; cam.ty = controls.target.y; cam.tz = controls.target.z;
     cam.px = camera.position.x; cam.py = camera.position.y; cam.pz = camera.position.z;
     cam.fov = camera.fov;
-    director = buildDirector(fc, fr);
+    fitCenter = fc; fitRadius = fr;
+    director = buildDirector(fc, fr * reelFitScale());
     if (mode !== 'reel') applyGrade('reveal', 0); else setAct('reveal');
 
     // verification hook: ?t=<seconds> pauses the reel at an absolute timeline
@@ -678,6 +693,7 @@ gltf.load(
   (err) => { console.error('GLB load failed', err); if (pctEl) pctEl.textContent = 'ERR'; }
 );
 
+let lastPortrait = (window.innerWidth / window.innerHeight) < REEL_REF_ASPECT;
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
@@ -685,6 +701,20 @@ addEventListener('resize', () => {
   composer.setSize(window.innerWidth, window.innerHeight);
   bloom.setSize(window.innerWidth, window.innerHeight);
   grade.uniforms.uRes.value.set(window.innerWidth * DPR, window.innerHeight * DPR);
+
+  // re-frame the reel only when we cross the portrait/landscape boundary
+  // (e.g. phone rotation) — rebuilding every resize tick would thrash the timeline
+  const isPortrait = (window.innerWidth / window.innerHeight) < REEL_REF_ASPECT;
+  if (isPortrait !== lastPortrait && fitCenter && director) {
+    lastPortrait = isPortrait;
+    const at = director.time();
+    const wasPaused = director.paused();
+    director.kill();
+    director = buildDirector(fitCenter, fitRadius * reelFitScale());
+    director.time(at);
+    if (wasPaused || mode !== 'reel') director.pause();
+    setAct(currentAct);
+  }
 });
 
 // ---------------------------------------------------------------------------
