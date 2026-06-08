@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 
 // --- JRV brand palette ---
@@ -47,7 +48,7 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 // was the main reason the orange read "faded"/chalky under the bright clear sky.
 // Neutral holds the candy saturation while still rolling off the sky highlights.
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.18;
+renderer.toneMappingExposure = 1.06;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -66,29 +67,32 @@ const DETAIL_DUR = 3.8;
 let pullT = 0;
 const PULL_DUR = 2.8;
 
-// ===== IBL — CLEAR midday PURE-SKY HDRI (sunny racetrack daylight) =====
+// ===== IBL — TWILIGHT PURE-SKY HDRI (dusk racetrack / Most-Wanted dusk grade) =====
+// Cool blue dome with a warm low sun on the horizon → teal-shadow / orange-highlight
+// split that reads cinematic AND keeps the orange car popping (an orange sky would
+// have gone muddy on an already-orange body).
 const pmrem = new THREE.PMREMGenerator(renderer);
 pmrem.compileEquirectangularShader();
 let skyEnv = null;
 let skyEquirect = null;
-new RGBELoader().load('model/kloofendal_43d_clear_puresky_2k.hdr', (hdr) => {
+new RGBELoader().load('model/belfast_sunset_puresky_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   skyEquirect = hdr;
   skyEnv = pmrem.fromEquirectangular(hdr).texture;
   scene.environment = skyEnv;
-  scene.environmentIntensity = 1.25;
+  scene.environmentIntensity = 1.15;
   if (revealed) applySkyBackground();
 });
 
-scene.background = new THREE.Color(0x20262a);   // neutral render-studio grey behind the rim study
+scene.background = new THREE.Color(0x0d1119);   // deep dusk-blue behind the rim study
 
 function applySkyBackground() {
   if (!skyEquirect) return;
-  scene.environmentIntensity = 1.35;
+  scene.environmentIntensity = 1.3;             // sky carries the gloss reflections (bg dimmed separately)
   scene.background = skyEquirect;
-  scene.backgroundBlurriness = 0.08;            // less defocus → crisper reflections in the clearcoat
-  scene.backgroundIntensity = 0.95;
-  scene.fog = new THREE.FogExp2(0xb8c6cf, 0.012);  // faint heat-haze down the track
+  scene.backgroundBlurriness = 0.14;            // softer dusk dome → bright horizon doesn't blow out
+  scene.backgroundIntensity = 0.6;
+  scene.fog = new THREE.FogExp2(0x161c28, 0.02);   // cool dusk haze rolling down the track
 }
 
 // the SNAP: rim study → real PBR + sky bg + the car comes alive
@@ -121,40 +125,41 @@ function fitCamera() {
 }
 fitCamera();
 
-// ===== lighting — sunny midday: a strong warm sun key, cool sky fill =====
-scene.add(new THREE.AmbientLight(0x9fb7d0, 0.32));
+// ===== lighting — DUSK: a low warm raking sun, deep-blue twilight fill =====
+scene.add(new THREE.AmbientLight(0x33415c, 0.30));   // cool dusk ambient (teal shadows)
 
-// the SUN — warm, hard, high. Carries the hard shadow + the clearcoat hot-spot.
-const key = new THREE.DirectionalLight(0xfff2dc, 2.4);
-key.position.set(5, 11, 4);
+// the SUN — low, warm, raking. Long dramatic shadow + a hot orange clearcoat streak
+// down the flank (the Most-Wanted golden-hour kiss).
+const key = new THREE.DirectionalLight(0xffd9b4, 2.6);
+key.position.set(7, 6, 5);                          // lower than midday → longer rake
 key.castShadow = true;
 key.shadow.mapSize.set(2048, 2048);
-key.shadow.camera.near = 1; key.shadow.camera.far = 32;
-key.shadow.camera.left = -7; key.shadow.camera.right = 7;
-key.shadow.camera.top = 7; key.shadow.camera.bottom = -7;
-key.shadow.bias = -0.0004; key.shadow.radius = 5;
+key.shadow.camera.near = 1; key.shadow.camera.far = 40;
+key.shadow.camera.left = -8; key.shadow.camera.right = 8;
+key.shadow.camera.top = 8; key.shadow.camera.bottom = -8;
+key.shadow.bias = -0.0004; key.shadow.radius = 6;
 scene.add(key);
 
-// cool sky fill — open blue sky bounce from the other side
-const skyFill = new THREE.DirectionalLight(0xbcd6ff, 0.7);
+// deep-blue twilight fill — cool bounce from the opposite sky (carves the teal shadow side)
+const skyFill = new THREE.DirectionalLight(0x5874a8, 0.85);
 skyFill.position.set(-6, 5, -3);
 scene.add(skyFill);
 
-// rim from behind to carve the silhouette
-const rim = new THREE.DirectionalLight(0xfff6ea, 0.8);
+// cold rim from behind to carve the silhouette against the dusk
+const rim = new THREE.DirectionalLight(0xbcd0ff, 1.1);
 rim.position.set(-2, 3, -7);
 scene.add(rim);
 
-// soft front fill — lifts the car's face out of shadow at ANY orbit angle once
-// you drag the camera around (the sun alone leaves the rear dark when you swing
-// behind it). Kept low so the HDRI still leads.
-const frontFill = new THREE.DirectionalLight(0xffffff, 0.4);
+// camera-side fill — at dusk the raking sun lights the FAR flank, so the near
+// (camera) side falls into shadow and the paint reads dark/crimson. This warm fill
+// puts a glossy specular hit back on the visible side without flattening the mood.
+const frontFill = new THREE.DirectionalLight(0xfff0e2, 0.9);
 frontFill.position.set(0, 3.5, 8);
 scene.add(frontFill);
 
 // ONE brand accent — a warm JRV-orange kiss along the near flank. Restraint:
 // a single tinted light reads as a signature glint, not a stage-gel disco.
-const accent = new THREE.DirectionalLight(JRV.orange, 0.45);
+const accent = new THREE.DirectionalLight(JRV.orange, 0.7);
 accent.position.set(6, 2.2, 3.5);
 scene.add(accent);
 
@@ -271,10 +276,10 @@ gltfLoader.load('model/porsche-gt3rs.glb', (gltf) => {
       // muddy half-metal it was) under a mirror clearcoat for the wet gloss highlight.
       // envMap pushed hard so the sky + track actually reflect in the panels.
       const p = new THREE.MeshPhysicalMaterial({
-        color: new THREE.Color(0xff4a14),       // punchier than brand 0xF15828 — survives tonemap
-        metalness: 0.85, roughness: 0.34,
+        color: new THREE.Color(0xff5a1c),       // candy orange — survives tonemap + dusk grade without going crimson
+        metalness: 0.85, roughness: 0.30,
         clearcoat: 1.0, clearcoatRoughness: 0.03,
-        envMapIntensity: 2.6,
+        envMapIntensity: 3.0,                   // dusk sky reflects hard → wet candy gloss
         specularIntensity: 1.0,
         sheen: 0.0,
       });
@@ -492,7 +497,7 @@ const smokeSprites = [];
 const smokeState = [];
 for (let i = 0; i < SMOKE_N; i++) {
   const s = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: smokeTex, transparent: true, depthWrite: false, opacity: 0, color: 0xccd1d7,
+    map: smokeTex, transparent: true, depthWrite: false, opacity: 0, color: 0x6b7079,
   }));
   s.scale.set(0.001, 0.001, 1);
   s.visible = false;
@@ -511,8 +516,8 @@ function emitSmoke(px, py, pz, back, lateral) {
   st.vz = back.z * (1.9 + Math.random() * 1.4) + lateral.z * (0.7 + Math.random() * 1.0) + (Math.random() - 0.5) * 0.4;
   st.vy = 0.4 + Math.random() * 0.7;
   st.s0 = 0.18 + Math.random() * 0.14;
-  st.s1 = 1.2 + Math.random() * 1.0;
-  st.peak = 0.3 + Math.random() * 0.22;
+  st.s1 = 1.0 + Math.random() * 0.85;
+  st.peak = 0.16 + Math.random() * 0.12;
   sp.visible = true;
 }
 function updateSmoke(dt) {
@@ -585,12 +590,77 @@ function updateBurn(dt, recede) {
 let burnAccum = 0;
 let seededAction = false;
 
-// ===== postprocessing (subtle bloom on lights only) =====
+// ===== postprocessing — Most-Wanted cinematic chain =====
+// RenderPass → Bloom (lights + bright dusk highlights glow) → OutputPass (tonemap+sRGB)
+// → CinematicPass (radial speed-blur + chromatic aberration + teal/orange grade +
+//    vignette + film grain). The grade runs on display-ready pixels so it behaves
+//    like a real colour-grade LUT rather than fighting the tonemapper.
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.24, 0.55, 0.9);
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.34, 0.5, 0.9);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+
+const CinematicShader = {
+  uniforms: {
+    tDiffuse:   { value: null },
+    uTime:      { value: 0 },
+    uSpeed:     { value: 0 },     // 0..1 track speed → radial smear + chroma
+    uThrottle:  { value: 0 },     // 0..1 tap burst → punchier smear
+    uResolution:{ value: new THREE.Vector2(innerWidth, innerHeight) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    uniform sampler2D tDiffuse;
+    uniform float uTime, uSpeed, uThrottle;
+    uniform vec2 uResolution;
+    varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    void main() {
+      vec2 uv = vUv;
+      vec2 dir = uv - 0.5;                       // outward from centre
+      float edge = dot(dir, dir);                // 0 centre → ~0.5 corner
+      float speedAmt = uSpeed * 0.55 + uThrottle * 0.55;
+
+      // ---- radial speed blur smeared toward centre, harder at the edges + faster ----
+      float blurStr = speedAmt * edge * 1.0;
+      float chroma  = 0.0016 + speedAmt * 0.0045;   // chromatic aberration grows with speed
+      vec3 col = vec3(0.0);
+      const int N = 8;
+      for (int i = 0; i < N; i++) {
+        float t = float(i) / float(N - 1);
+        vec2 s = uv - dir * blurStr * t;
+        col.r += texture2D(tDiffuse, s + dir * chroma).r;
+        col.g += texture2D(tDiffuse, s).g;
+        col.b += texture2D(tDiffuse, s - dir * chroma).b;
+      }
+      col /= float(N);
+
+      // ---- cinematic grade: teal-cool shadows, warm-orange highlights ----
+      float luma = dot(col, vec3(0.299, 0.587, 0.114));
+      vec3 shadowTint = vec3(0.92, 1.00, 1.09);
+      vec3 highTint   = vec3(1.06, 1.00, 0.93);
+      col *= mix(shadowTint, highTint, smoothstep(0.20, 0.80, luma));
+      col = (col - 0.5) * 1.12 + 0.5;            // contrast S-curve
+      col = mix(vec3(luma), col, 1.12);          // saturation lift
+      col = clamp(col, 0.0, 1.0);
+
+      // ---- vignette ----
+      float vig = smoothstep(0.95, 0.25, length(dir) * 1.28);
+      col *= mix(0.74, 1.0, vig);
+
+      // ---- film grain ----
+      col += (hash(uv * uResolution + uTime) - 0.5) * 0.055;
+
+      gl_FragColor = vec4(col, 1.0);
+    }
+  `,
+};
+const cinematic = new ShaderPass(CinematicShader);
+composer.addPass(cinematic);
 
 // ===== pointer parallax + DRIFT STEERING =====
 // Hover (desktop) or touch position steers the slide: cursor left → the 911 drifts
@@ -800,9 +870,9 @@ function animate() {
     // trail in one frame so the still already shows the plume + laid rubber.
     if (frozen && !seededAction) {
       seededAction = true;
-      const sStep = 1 / 26, bStep = 1 / 60;
+      const sStep = 1 / 18, bStep = 1 / 60;
       let sa = 0, ba = 0;
-      for (let kf = 0; kf < 150; kf++) {
+      for (let kf = 0; kf < 95; kf++) {
         const tt = kf * 0.02;
         const dyaw = 0.34 * Math.sin(tt * 0.85) + 0.12 * Math.sin(tt * 1.7) + 0.12;
         carRoot.rotation.y = BASE_YAW + dyaw;
@@ -830,9 +900,23 @@ function animate() {
   updateSmoke(dt);
   updateBurn(dt, _recede);
 
-  // ---- headlight breathing ----
-  const pulse = reduceMotion ? 1.8 : 1.7 + Math.sin(t * 2.0) * 0.3;
+  // ---- headlight breathing (brighter for the dusk → bloom streaks read like MW) ----
+  const pulse = reduceMotion ? 2.4 : 2.3 + Math.sin(t * 2.0) * 0.4;
   for (const m of lampMats) if (!/tail|brake/.test((m.name || '').toLowerCase())) m.emissiveIntensity = pulse;
+
+  // ---- speed-rush FOV punch: the lens widens as the car gets up to speed + on a tap ----
+  if (!(frozen && azOverride !== null)) {
+    const targetFov = (phase === 'drift' || phase === 'pull')
+      ? 40 + speedFactor * 3 + throttle * 9
+      : 40;
+    camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 5);
+    camera.updateProjectionMatrix();
+  }
+
+  // ---- feed the cinematic grade: speed drives the radial smear + chromatic aberration ----
+  cinematic.uniforms.uTime.value = t;
+  cinematic.uniforms.uSpeed.value = speedFactor;
+  cinematic.uniforms.uThrottle.value = throttle;
 
   // ---- HUD heading ----
   let deg = ((RIG.az * 180 / Math.PI) % 360 + 360) % 360;
@@ -848,6 +932,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
   bloom.setSize(innerWidth, innerHeight);
+  cinematic.uniforms.uResolution.value.set(innerWidth, innerHeight);
   const dpr = Math.min(window.devicePixelRatio, 2);
   apronMirror.getRenderTarget().setSize(Math.floor(innerWidth * dpr), Math.floor(innerHeight * dpr));
 });

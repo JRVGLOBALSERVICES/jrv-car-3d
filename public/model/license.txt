@@ -13,7 +13,7 @@ This work is based on "(FREE) Porsche 911 Carrera 4S" (https://sketchfab.com/3d-
 ---
 
 HDRI Environment:
-* title:	Niederwihl Forest
-* source:	https://polyhaven.com/a/niederwihl_forest
+* title:	Belfast Sunset (Pure Sky)
+* source:	https://polyhaven.com/a/belfast_sunset_puresky
 * license:	CC0 (public domain) — attribution appreciated, not required
-* used for:	overcast forest image-based lighting + blurred backdrop
+* used for:	twilight image-based lighting + dusk backdrop (Most-Wanted cinematic grade)
