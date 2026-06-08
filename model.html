@@ -38,15 +38,20 @@
     </div>
 
     <script>
+      // Orbit — neutral cool studio (uses the showroom.js defaults + dark bg)
       window.__MOOD = {
         hdri: 'cobblestone_street_night_2k.hdr',
         label: 'Orbit',
         exposure: 1.0,
-        bgBlur: 0.12,
-        bgIntensity: 0.5,
-        envIntensity: 0.85,
-        rimColor: 0xffb072,
-        keyColor: 0xdce6ff,
+        envIntensity: 0.88,
+        bgTop: 0x06070c, bgBot: 0x0c1018,
+        keyColor: 0xe2ecff, keyPower: 16,
+        rimColor: 0xff9c54, rimPower: 22,
+        fillColor: 0xbcd0ff, fillPower: 4.5,
+        grade: {
+          contrast: 1.08, saturation: 1.05, vignette: 0.44, grain: 0.022,
+          shadowTint: [0.005, 0.02, 0.045], highTint: [0.01, 0.025, 0.05],
+        },
       };
     </script>
     <script type="module" src="/src/showroom.js"></script>

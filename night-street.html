@@ -46,15 +46,22 @@
     </div>
 
     <script>
+      // Backstreet — warm studio mood: warm charcoal cyclorama + restrained
+      // amber grade (NOT the over-gold flood), hot orange rim, warm key.
       window.__MOOD = {
         hdri: 'cobblestone_street_night_2k.hdr',
-        label: 'Backstreet',
-        exposure: 1.0,
-        bgBlur: 0.12,
-        bgIntensity: 0.5,
+        label: 'Backstreet · KL after dark',
+        exposure: 0.98,
         envIntensity: 0.85,
-        rimColor: 0xffb072,
-        keyColor: 0xdce6ff,
+        bgTop: 0x0a0805, bgBot: 0x17110a,
+        keyColor: 0xffe9cf, keyPower: 15,
+        rimColor: 0xff7e36, rimPower: 23,
+        fillColor: 0xffd9b0, fillPower: 4.0,
+        paintBase: 0x101a30,
+        grade: {
+          contrast: 1.08, saturation: 1.03, vignette: 0.5, grain: 0.026,
+          shadowTint: [0.04, 0.018, 0.0], highTint: [0.05, 0.03, 0.006],
+        },
       };
     </script>
     <script type="module" src="/src/showroom.js"></script>

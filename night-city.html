@@ -46,15 +46,22 @@
     </div>
 
     <script>
+      // After Dark — cool studio mood: blue cyclorama + teal grade, with a
+      // warm rim for jewel separation (the combo that made the Cycles render pop)
       window.__MOOD = {
         hdri: 'modern_buildings_night_2k.hdr',
-        label: 'After Dark',
-        exposure: 0.8,
-        bgBlur: 0.2,
-        bgIntensity: 0.3,
-        envIntensity: 0.68,
-        rimColor: 0x6ea0ff,
-        keyColor: 0xeaf0ff,
+        label: 'After Dark · KL skyline',
+        exposure: 1.0,
+        envIntensity: 0.82,
+        bgTop: 0x05060c, bgBot: 0x0a1320,
+        keyColor: 0xe2ecff, keyPower: 16,
+        rimColor: 0xff9c54, rimPower: 22,
+        fillColor: 0xbcd0ff, fillPower: 4.5,
+        paintBase: 0x0e1b34,
+        grade: {
+          contrast: 1.1, saturation: 1.07, vignette: 0.46, grain: 0.024,
+          shadowTint: [0.0, 0.025, 0.055], highTint: [0.012, 0.032, 0.06],
+        },
       };
     </script>
     <script type="module" src="/src/showroom.js"></script>
