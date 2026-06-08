@@ -456,6 +456,30 @@ let fitRadius = 1;
 const headMats = [];   // headlights + DRL (cool white)
 const tailMats = [];   // tail + brake (red)
 
+// wheel pivots — the re-exported GLB keeps 4 SEPARATE wheel nodes (the old GLB
+// had them merged, which is why they couldn't spin). Each wheel is wrapped in a
+// pivot Group at its hub so it spins about the axle (world X) in place.
+const wheelPivots = [];
+let wheelAngle = 0;
+function setupWheels(root) {
+  const roots = [];
+  root.traverse((n) => {
+    if (/wheels_20x9/.test(n.name || '') && !/GT3RS_black|wheels_chrome/.test(n.name)) roots.push(n);
+  });
+  const wc = new THREE.Vector3();
+  for (const w of roots) {
+    const parent = w.parent;
+    if (!parent) continue;
+    new THREE.Box3().setFromObject(w).getCenter(wc);     // hub centre (world)
+    const pivot = new THREE.Group();
+    pivot.position.copy(parent.worldToLocal(wc.clone())); // hub in parent space
+    parent.add(pivot);
+    pivot.attach(w);                                      // re-parent, keep world xf
+    wheelPivots.push(pivot);
+  }
+  return wheelPivots.length;
+}
+
 function tuneMaterials(root) {
   root.traverse((n) => {
     if (!n.isMesh || !n.material) return;
@@ -773,7 +797,7 @@ draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 const gltf = new GLTFLoader();
 gltf.setDRACOLoader(draco);
 gltf.load(
-  `${BASE}model/porsche-gt3rs.glb`,
+  `${BASE}model/porsche-gt3rs-wheels.glb`,   // re-export: 4 SEPARATE wheel nodes
   (data) => {
     const root = data.scene;
     const stray = root.getObjectByName('Cube');
@@ -785,6 +809,7 @@ gltf.load(
     tuneMaterials(root);
     scene.add(root);
     frameObject(root);
+    const nWheels = setupWheels(root);   // 4 expected; spins in the render loop
 
     const fitted = new THREE.Box3().setFromObject(root);
     const fc = fitted.getCenter(new THREE.Vector3());
@@ -955,6 +980,12 @@ function tick() {
   if (cityGroup.visible) scrollCity(0.016);
   if (wind.visible) scrollWind(0.016);
   if (stars.visible) stars.rotation.y += 0.0008;
+  // spin the wheels — tied to the same speed that scrolls the road/city, so the
+  // tyres roll in step with the world rushing past (idle cruise → fast pursuit).
+  if (wheelPivots.length) {
+    wheelAngle += (roadSpeed + 0.25) * 0.13;   // +0.25 so they idle-roll, never dead
+    for (const p of wheelPivots) p.rotation.x = wheelAngle;
+  }
 
   if (mode === 'control') {
     controls.update();
