@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { BokehPass } from 'three/addons/postprocessing/BokehPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { gsap } from 'gsap';
@@ -17,8 +18,10 @@ const BASE = import.meta.env.BASE_URL; // '/' in prod, './' for file:// probe bu
 // ============================================================================
 // JRV 911 — cinematic "attract reel" (NFS Most Wanted / Hot Pursuit grammar)
 // ----------------------------------------------------------------------------
-// A GSAP master timeline directs the camera in hard cuts through three ACTS —
-//   REVEAL  (studio)  → SPEED (dusk street, world rushing past) → HERO (sunset)
+// A GSAP master timeline directs the camera in hard cuts through three ACTS,
+// each lit by its OWN real Poly Haven HDRI (not a recoloured single map):
+//   REVEAL (brown photo studio) → PURSUIT (modern-buildings NIGHT, world
+//   rushing past) → GOLDEN HOUR (belfast sunset)
 // — each with its own colour grade, light beats, audio envelope and transition
 // vocabulary (hard cut · whip-pan motion-blur · slow-mo speed-ramp). Drag any
 // time takes the wheel (OrbitControls); idle 6s and the reel resumes.
@@ -165,6 +168,7 @@ const SKY_RADIUS = 90;
 let studioSky = null;
 let studioEnv = null;
 let sunsetEnv = null;
+let nightEnv = null;
 
 const rgbe = new RGBELoader();
 rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
@@ -184,9 +188,16 @@ rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
 });
 rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  sunsetEnv = hdr;   // used as the reflection env in SPEED/HERO acts
-  // if we're already in a street act, switch reflections to it now
-  if (currentAct && currentAct !== 'reveal') scene.environment = hdr;
+  sunsetEnv = hdr;   // reflection env for the GOLDEN HOUR act
+  if (currentAct === 'hero') scene.environment = hdr;
+});
+// PURSUIT act: a real night-city HDRI (modern_buildings_night, Poly Haven CC0)
+// — its neon vertical streaks rake across the iridescent clearcoat, selling the
+// chase far better than the recoloured sunset map it replaced.
+rgbe.load(`${BASE}model/modern_buildings_night_2k.hdr`, (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  nightEnv = hdr;
+  if (currentAct === 'speed') scene.environment = hdr;
 });
 
 function frameObject(target) {
@@ -254,6 +265,15 @@ function tuneMaterials(root) {
   });
 }
 
+// rack the lens to a given subject distance (world units). Hold shots open the
+// aperture for a visible fall-off on the dome/road behind the car; whip/ramp
+// shots stay near-sharp so the fast move reads. No-op on mobile (no bokeh pass).
+function rackFocus(dist, aperture, dur = 1.1) {
+  if (!bokeh) return;
+  gsap.to(bokeh.uniforms['focus'], { value: dist, duration: dur, ease: 'power2.inOut' });
+  gsap.to(bokeh.uniforms['aperture'], { value: aperture, duration: dur, ease: 'power2.inOut' });
+}
+
 // pulse a light group — used on shot beats (headlight ignition, brake flare)
 function beat(group, peak, dur = 0.45) {
   if (!group.length) return;
@@ -266,14 +286,25 @@ function beat(group, peak, dur = 0.45) {
 
 // ---------------------------------------------------------------------------
 // POST-PROCESSING — the film look. Chain:
-//   RenderPass → Bloom (lights/sun) → Afterimage (motion blur on whips)
-//   → Grade (tint/contrast/sat/vignette/grain/chromatic-aberration) → Output
-// Mobile drops the afterimage pass and runs bloom at lower strength.
+//   RenderPass → Bokeh DOF (rack-focus on holds) → Bloom (lights/sun)
+//   → Afterimage (motion blur on whips)
+//   → Grade (tint/contrast/sat/vignette/chromatic-aberration/grain) → Output
+// Mobile drops the Bokeh + afterimage passes and runs bloom at lower strength.
 // ---------------------------------------------------------------------------
 const composer = new EffectComposer(renderer);
 composer.setPixelRatio(DPR);
 composer.setSize(window.innerWidth, window.innerHeight);
 composer.addPass(new RenderPass(scene, camera));
+
+// Bokeh DOF: BokehPass takes the previous pass's colour + its own depth render,
+// so it sits right after RenderPass. focus is in WORLD units (camera→subject
+// distance); the director racks it per shot. Desktop only — it's a second
+// full-scene (depth) render, too heavy for low-end mobile GPUs.
+let bokeh = null;
+if (!isMobile) {
+  bokeh = new BokehPass(scene, camera, { focus: 6.0, aperture: 0.0009, maxblur: 0.006 });
+  composer.addPass(bokeh);
+}
 
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
@@ -388,15 +419,18 @@ function setAct(name) {
     setRoadSpeed(0);
     setEngineSpeed(0.85);
   } else {
-    // SPEED + HERO: dusk/sunset street. Fade the studio out, road + dome in.
-    if (sunsetEnv) scene.environment = sunsetEnv;
+    // PURSUIT (night city) + GOLDEN HOUR (sunset) street. Fade studio out, road
+    // + dome in, and reflect the act's OWN HDRI off the car.
+    const env = name === 'hero' ? sunsetEnv : nightEnv;
+    if (env) scene.environment = env;
     if (studioSky) gsap.to(studioSky.material, { opacity: 0, duration: 0.9, onComplete: () => { studioSky.visible = false; } });
     if (scene.background) scene.background = null;
     dome.visible = true;
     road.visible = true;
-    // dusk vs golden-hour dome tint
-    const top = name === 'hero' ? '#1a1410' : '#0e1119';
-    const bot = name === 'hero' ? '#7a3d1c' : '#3a221a';
+    // deep-night vs golden-hour dome tint (the HDRI carries the real reflections;
+    // the dome is just the far backdrop gradient behind the road).
+    const top = name === 'hero' ? '#1a1410' : '#05070e';
+    const bot = name === 'hero' ? '#7a3d1c' : '#161b2c';
     dome.material.map = skyDomeTexture(top, bot);
     dome.material.map.needsUpdate = true;
     gsap.to(dome.material, { opacity: 1, duration: 1.0 });
@@ -545,9 +579,14 @@ function buildDirector(c, r) {
   const tl = gsap.timeline({ repeat: -1, paused: mode !== 'reel' });
   for (const s of shots) {
     const L0 = s.look, L1 = s.lookTo || s.look;
+    // focus distance for this shot = camera-start → look-target distance, so the
+    // car sits in the sharp plane; holds open the aperture, fast moves stay crisp.
+    const fdist = Math.hypot(s.from[0] - L0[0], s.from[1] - L0[1], s.from[2] - L0[2]);
+    const fap = (s.transition === 'whip' || s.transition === 'ramp') ? 0.0005 : 0.0015;
     // act + beat fire at the cut
     tl.call(() => {
       setAct(s.act);
+      rackFocus(fdist, fap, 1.0);
       if (s.beat === 'head') beat(headMats, 6.0, 0.5);
       if (s.beat === 'brake') { beat(tailMats, 7.0, 0.6); playScreech(); }
       // whip-pan: spike the motion-blur damp, then ease it back down

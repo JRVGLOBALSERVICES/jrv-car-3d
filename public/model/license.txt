@@ -18,8 +18,20 @@ HDRI Environment (current — hazy-daylight grade):
 * license:	CC0 (public domain) — attribution appreciated, not required
 * used for:	clear-daytime image-based lighting + hazy daylight backdrop (NFS reel grade)
 
-HDRI Environment (previous — retained for the dusk look):
+HDRI Environment (GOLDEN HOUR act):
 * title:	Belfast Sunset (Pure Sky)
 * source:	https://polyhaven.com/a/belfast_sunset_puresky
 * license:	CC0 (public domain) — attribution appreciated, not required
-* used for:	twilight image-based lighting + dusk backdrop (Most-Wanted cinematic grade)
+* used for:	sunset image-based lighting + golden-hour backdrop (hero act)
+
+HDRI Environment (PURSUIT act):
+* title:	Modern Buildings Night
+* source:	https://polyhaven.com/a/modern_buildings_night
+* license:	CC0 (public domain) — attribution appreciated, not required
+* used for:	night-city image-based lighting — neon streaks across the clearcoat (pursuit act)
+
+HDRI Environment (REVEAL act):
+* title:	Brown Photostudio 02
+* source:	https://polyhaven.com/a/brown_photostudio_02
+* license:	CC0 (public domain) — attribution appreciated, not required
+* used for:	studio image-based lighting + grounded skybox (reveal act)
