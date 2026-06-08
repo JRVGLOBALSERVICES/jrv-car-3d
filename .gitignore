@@ -3,3 +3,9 @@ dist
 .DS_Store
 *.local
 .vercel
+
+# throwaway CDP capture/probe scripts (Friday session)
+cap.cjs
+probe.cjs
+shoot*.cjs
+distprobe/
