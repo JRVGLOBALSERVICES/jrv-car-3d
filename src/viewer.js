@@ -155,8 +155,19 @@ function tuneMaterials(root) {
       const name = (m.name || '').toLowerCase();
       if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
         m.clearcoat = 1.0; m.clearcoatRoughness = 0.08;
-        m.roughness = Math.min(m.roughness ?? 0.4, 0.35);
-        m.envMapIntensity = 1.0;
+        m.roughness = Math.min(m.roughness ?? 0.4, 0.3);
+        m.envMapIntensity = 1.15;
+        // --- iridescent thin-film paint (native MeshPhysicalMaterial layer) ---
+        // A real thin-film interference coat over the paint: reflections shift
+        // hue with viewing angle (oil-slick / pearlescent wrap), strongest at
+        // grazing angles. Needs the env map (we have the studio HDRI) to read.
+        m.iridescence = 1.0;
+        m.iridescenceIOR = 1.3;               // film refractive index (1.0–2.33)
+        m.iridescenceThicknessRange = [130, 720]; // nm — wide range = full spectrum sweep
+        // a darker, lower-sat base lets the interference colours dominate the
+        // surface instead of being washed out by a bright body colour.
+        if (m.color) m.color.lerp(new THREE.Color(0x0b0d12), 0.55);
+        m.metalness = Math.max(m.metalness ?? 0, 0.6);
       } else if (/chrome|mirror|metal/.test(name)) {
         m.metalness = 1.0; m.roughness = Math.min(m.roughness ?? 0.1, 0.12);
         m.envMapIntensity = 1.4;
