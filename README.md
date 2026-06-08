@@ -193,3 +193,42 @@ Direction supplied by Rj:
   grade sits on top of.
 - **Earlier — rain reveal:** clay→full-render reveal that snapped to a wet 911 on a forest
   road with a tyre water-spray plume (superseded by the trackday concept).
+
+---
+
+## Scroll-scrub reels — `night-city.html` + `night-street.html`
+
+Two photoreal companion pages to the real-time drift hero. Each is a **Blender
+Cycles turntable of the same 911**, rendered frame-by-frame off-line, then played
+back on a `<canvas>` as a scroll-driven **image-sequence scrub** — the iOS-safe
+technique (canvas `drawImage`, never `video.currentTime` seeking). Built because
+real-time WebGL `MeshPhysicalMaterial` cannot do **Thin-Film iridescence**; Cycles
+can, so the bold oil-slick paint shift is baked into the frames.
+
+| Page | Sequence | HDRI (mood) | Accent |
+|------|----------|-------------|--------|
+| `night-city.html` — *After Dark* | `/seq-a` (30 WebP) | Hansaplatz night plaza (Poly Haven CC0) | mint `--color-glow` (cool) |
+| `night-street.html` — *Backstreet* | `/seq-b` (30 WebP) | Cobblestone Street Night (Poly Haven CC0) | orange `--color-accent` (warm) |
+
+### Render pipeline (Blender → web)
+1. Live Blender scene (`COL-car`, `CAM-hero`), paint = `TwiXeR_992_carPaint` with
+   **Principled Thin Film** (510 nm, IOR 1.45) over a deep-indigo metallic base.
+2. Orbit rig: camera Track-To an empty at car centre, 360° turntable, 30 frames,
+   reflective dark floor; distracting studio/env collections hidden at render.
+3. Cycles GPU, 96 samples + OptiX denoise, **AgX** view transform, 1280×720.
+4. Frames Taildropped to the VPS → converted to **WebP q80** (~40–68 KB/frame,
+   ~2 MB per sequence) into `public/seq-a` / `public/seq-b`.
+
+### Playback (`src/scrub.js`, `src/scrub.css`)
+- All 30 frames preloaded with a `%` loader; first frame loads first for fast LCP
+  (`<link rel="preload" fetchpriority="high">`).
+- Frame index = Lenis scroll progress × (count − 1); drawn cover-fit to the canvas.
+- Editorial overlay **beats** reveal at scroll thresholds (asymmetric placement).
+- `prefers-reduced-motion`: Lenis disabled, native scroll mapped directly.
+- Left progress rail, scroll cue, cross-links to `model.html` + `index.html`.
+- `ImageObject` JSON-LD + OG tags per page.
+
+### Design system (inherited from `src/tokens.css`)
+Space Grotesk (display) + Geist Mono (labels), deep-navy `#05070d` ground,
+JRV orange `#F15828` / mint `#00FF88` accents, 4-pt spacing scale, `--ease-out`
+`cubic-bezier(0.16,1,0.3,1)`. Each page pins one `--accent` for identity.
