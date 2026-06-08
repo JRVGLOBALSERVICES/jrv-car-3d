@@ -160,6 +160,106 @@ dome.visible = false;
 scene.add(dome);
 
 // ---------------------------------------------------------------------------
+// NIGHT CITY (PURSUIT act). The night HDRI alone only lit + reflected — it never
+// read as a city. This is the actual city you drive through: instanced building
+// blocks with lit-window facades flanking the road, plus sodium/neon streetlight
+// posts that the afterimage pass smears into light streaks as they rush past.
+// The whole thing scrolls toward the camera synced to roadSpeed (car stays put,
+// world moves — same trick as the road). Hidden until the SPEED act fades it in.
+// ---------------------------------------------------------------------------
+const CITY_DEPTH = 380;   // recycle length along z
+const CITY_NEAR = 44;     // z past which an element wraps back to the far end
+const cityGroup = new THREE.Group();
+cityGroup.visible = false;
+scene.add(cityGroup);
+
+// dark facade with a grid of randomly-lit windows (used as BOTH colour + emissive)
+function facadeTexture() {
+  const w = 128, h = 256, c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#04050a'; ctx.fillRect(0, 0, w, h);
+  const cols = 6, rows = 16, mx = 12, my = 10;
+  const cw = (w - mx * 2) / cols, ch = (h - my * 2) / rows;
+  const lit = ['#ffd8a0', '#ffe6c4', '#cfe0ff', '#a8bcff', '#fff0cf'];
+  for (let r = 0; r < rows; r++) for (let cI = 0; cI < cols; cI++) {
+    if (Math.random() < 0.5) continue;            // dark window
+    ctx.fillStyle = lit[(Math.random() * lit.length) | 0];
+    ctx.globalAlpha = 0.55 + Math.random() * 0.45;
+    ctx.fillRect(mx + cI * cw + 2, my + r * ch + 2, cw - 4, ch - 4);
+  }
+  ctx.globalAlpha = 1;
+  return new THREE.CanvasTexture(c);
+}
+const facade = facadeTexture();
+const cityMat = new THREE.MeshStandardMaterial({
+  map: facade, emissiveMap: facade, emissive: 0xffffff, emissiveIntensity: 0.85,
+  roughness: 0.88, metalness: 0.0, transparent: true, opacity: 0,
+});
+const CITY_N = 60;
+const cityZ = new Float32Array(CITY_N);
+const cityData = [];
+const cityMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), cityMat, CITY_N);
+cityMesh.frustumCulled = false;
+const _cm = new THREE.Matrix4(), _cq = new THREE.Quaternion(), _cs = new THREE.Vector3(), _cp = new THREE.Vector3();
+for (let i = 0; i < CITY_N; i++) {
+  const side = i % 2 === 0 ? -1 : 1;
+  const bw = 6 + Math.random() * 11;
+  const bd = 6 + Math.random() * 11;
+  const bh = 12 + Math.random() * 46;
+  const x = side * (15 + Math.random() * 26);
+  cityData.push({ x, w: bw, d: bd, h: bh });
+  cityZ[i] = CITY_NEAR - (i / CITY_N) * CITY_DEPTH - Math.random() * 6;
+}
+function placeCity() {
+  for (let i = 0; i < CITY_N; i++) {
+    const b = cityData[i];
+    _cp.set(b.x, b.h / 2, cityZ[i]); _cs.set(b.w, b.h, b.d);
+    _cm.compose(_cp, _cq, _cs); cityMesh.setMatrixAt(i, _cm);
+  }
+  cityMesh.instanceMatrix.needsUpdate = true;
+}
+placeCity();
+cityGroup.add(cityMesh);
+
+// streetlight / neon posts — bright unlit emissive so bloom + afterimage turn
+// them into the light streaks that sell speed. Alternating sodium / neon hues.
+const LAMP_N = 96;
+const lampZ = new Float32Array(LAMP_N);
+const lampData = [];
+const lampMat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, toneMapped: false });
+const lampMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.45, 3.4, 0.45), lampMat, LAMP_N);
+lampMesh.frustumCulled = false;
+const LAMP_HUES = [0xff9a3c, 0xff9a3c, 0xff3d7a, 0x30d6ff]; // mostly sodium, some neon
+const _lc = new THREE.Color();
+for (let i = 0; i < LAMP_N; i++) {
+  const side = i % 2 === 0 ? -1 : 1;
+  lampData.push({ x: side * 13.6, y: 5.4, hue: LAMP_HUES[(Math.random() * LAMP_HUES.length) | 0] });
+  lampZ[i] = CITY_NEAR - (i / LAMP_N) * CITY_DEPTH;
+  lampMesh.setColorAt(i, _lc.setHex(lampData[i].hue));
+}
+function placeLamps() {
+  for (let i = 0; i < LAMP_N; i++) {
+    const l = lampData[i];
+    _cp.set(l.x, l.y, lampZ[i]); _cs.set(1, 1, 1);
+    _cm.compose(_cp, _cq, _cs); lampMesh.setMatrixAt(i, _cm);
+  }
+  lampMesh.instanceMatrix.needsUpdate = true;
+}
+placeLamps();
+cityGroup.add(lampMesh);
+
+// advance the city toward the camera and wrap elements that pass behind it
+function scrollCity(dt) {
+  const adv = roadSpeed * dt * 13;
+  if (adv <= 0) return;
+  for (let i = 0; i < CITY_N; i++) { cityZ[i] += adv; if (cityZ[i] > CITY_NEAR) cityZ[i] -= CITY_DEPTH; }
+  for (let i = 0; i < LAMP_N; i++) { lampZ[i] += adv; if (lampZ[i] > CITY_NEAR) lampZ[i] -= CITY_DEPTH; }
+  placeCity(); placeLamps();
+}
+const cityFog = new THREE.Fog(0x070b16, 55, 330);  // applied only during PURSUIT
+
+// ---------------------------------------------------------------------------
 // IBL: studio HDRI (REVEAL) as a GroundedSkybox + sunset HDRI (SPEED/HERO) env.
 // ---------------------------------------------------------------------------
 const ENV_YAW = 2.2;
@@ -416,6 +516,9 @@ function setAct(name) {
     gsap.to(road.material, { opacity: 0, duration: 0.8, onComplete: () => { road.visible = false; } });
     gsap.to(dome.material, { opacity: 0, duration: 0.8, onComplete: () => { dome.visible = false; } });
     if (studioSky) { studioSky.visible = true; gsap.to(studioSky.material, { opacity: 1, duration: 1.0 }); }
+    scene.fog = null;
+    gsap.to(cityMat, { opacity: 0, duration: 0.6 });
+    gsap.to(lampMat, { opacity: 0, duration: 0.6, onComplete: () => { cityGroup.visible = false; } });
     setRoadSpeed(0);
     setEngineSpeed(0.85);
   } else {
@@ -435,8 +538,20 @@ function setAct(name) {
     dome.material.map.needsUpdate = true;
     gsap.to(dome.material, { opacity: 1, duration: 1.0 });
     gsap.to(road.material, { opacity: 1, duration: 0.9 });
-    if (name === 'speed') { setRoadSpeed(2.4); setEngineSpeed(1.85); }
-    else { setRoadSpeed(0.6); setEngineSpeed(1.15); }
+    if (name === 'speed') {
+      setRoadSpeed(2.4); setEngineSpeed(1.85);
+      // bring the actual night city up + night haze
+      scene.fog = cityFog;
+      cityGroup.visible = true;
+      gsap.to(cityMat, { opacity: 1, duration: 1.1 });
+      gsap.to(lampMat, { opacity: 1, duration: 1.1 });
+    } else {
+      setRoadSpeed(0.6); setEngineSpeed(1.15);
+      // GOLDEN HOUR: no city, no fog
+      scene.fog = null;
+      gsap.to(cityMat, { opacity: 0, duration: 0.7 });
+      gsap.to(lampMat, { opacity: 0, duration: 0.7, onComplete: () => { cityGroup.visible = false; } });
+    }
   }
 }
 function setRoadSpeed(v) { gsap.to({ s: roadSpeed }, { s: v, duration: 1.0, onUpdate() { roadSpeed = this.targets()[0].s; } }); }
@@ -559,15 +674,20 @@ const cam = { px: 4.2, py: 1.6, pz: 5.2, tx: 0, ty: 0.6, tz: 0, fov: 38 };
 function buildShots(c, r) {
   const at = (ox, oy, oz) => [c.x + ox * r, c.y + oy * r, c.z + oz * r];
   const tgt = (oy = 0.0) => [c.x, c.y + oy * r, c.z];
+  // look DOWN the road (−z, where the city streams in from) — the chase angle
+  const ahead = (oy = 0.06) => [c.x, c.y + oy * r, c.z - 9 * r];
   return [
     // ===== ACT I — REVEAL (studio) =====
     { act: 'reveal', beat: 'head', from: at(0.55, 0.16, 1.95), to: at(0.42, 0.22, 1.30), look: tgt(0.02), lookTo: tgt(0.04), fov: 36, fovTo: 30, dur: 2.6, ease: 'power2.out' },
     { act: 'reveal', from: at(-1.55, 0.10, 0.55), to: at(-1.55, 0.12, -0.65), look: tgt(0.05), fov: 42, fovTo: 42, dur: 2.4, ease: 'none' },
     { act: 'reveal', transition: 'whip', from: at(0.15, 2.05, 0.70), to: at(0.08, 1.45, 0.38), look: tgt(0.0), fov: 46, fovTo: 40, dur: 1.7, ease: 'power3.inOut' },
-    // ===== ACT II — PURSUIT (dusk street, world rushing) =====
-    { act: 'speed', transition: 'whip', beat: 'head', from: at(1.35, 0.50, -1.65), to: at(1.05, 0.46, -1.25), look: tgt(0.10), fov: 56, fovTo: 46, dur: 2.6, ease: 'power2.out' },
-    { act: 'speed', from: at(1.95, 0.26, -0.25), to: at(1.95, 0.30, 0.55), look: tgt(0.06), fov: 36, fovTo: 36, dur: 2.0, ease: 'none' },
-    { act: 'speed', transition: 'ramp', beat: 'brake', from: at(-1.7, 0.30, 0.30), to: at(-1.55, 0.36, -0.30), look: tgt(0.06), fov: 40, fovTo: 34, dur: 2.4, ease: 'power3.out' },
+    // ===== ACT II — PURSUIT (night city, world rushing) =====
+    // chase cam: low + behind, looking down the road into the oncoming city
+    { act: 'speed', transition: 'whip', beat: 'head', from: at(0.22, 0.22, 2.95), to: at(-0.10, 0.30, 2.45), look: ahead(0.12), lookTo: ahead(0.06), fov: 60, fovTo: 52, dur: 3.0, ease: 'power2.out' },
+    // low side track — car streaks past the lit storefronts/streetlights
+    { act: 'speed', from: at(2.35, 0.12, -0.75), to: at(2.35, 0.16, 0.95), look: tgt(0.06), fov: 48, fovTo: 46, dur: 2.2, ease: 'none' },
+    // brake slide — front 3/4, city walls behind, racked focus on the nose
+    { act: 'speed', transition: 'ramp', beat: 'brake', from: at(-1.7, 0.26, 0.30), to: at(-1.5, 0.32, -0.30), look: tgt(0.06), fov: 42, fovTo: 36, dur: 2.4, ease: 'power3.out' },
     // ===== ACT III — GOLDEN HOUR (sunset hero) =====
     { act: 'hero', transition: 'whip', from: at(1.25, 0.32, -1.45), to: at(1.05, 0.40, -1.15), look: tgt(0.08), fov: 34, fovTo: 30, dur: 2.4, ease: 'power2.out' },
     { act: 'hero', from: at(1.25, 0.42, 1.35), to: at(1.55, 1.05, 1.70), look: tgt(0.10), lookTo: tgt(0.18), fov: 36, fovTo: 28, dur: 3.0, ease: 'power2.inOut' },
@@ -649,6 +769,7 @@ function tick() {
   grade.uniforms.uTime.value = t;
   // scroll the road to sell speed (only matters when it's visible)
   if (roadSpeed > 0.001) roadTex.offset.y -= roadSpeed * 0.016;
+  if (cityGroup.visible) scrollCity(0.016);
 
   if (mode === 'control') {
     controls.update();
