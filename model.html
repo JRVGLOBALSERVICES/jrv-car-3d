@@ -67,6 +67,40 @@
         box-shadow: 0 0 10px var(--color-glow);
       }
 
+      /* --- cinematic HUD: act ticker (top-centre) + sound toggle --- */
+      .ticker {
+        position: absolute; top: var(--space-lg); left: 50%; transform: translateX(-50%);
+        display: flex; align-items: baseline; gap: 10px;
+        font-family: var(--font-mono); text-transform: uppercase;
+      }
+      .ticker .num {
+        font-size: 12px; letter-spacing: 0.1em; color: var(--color-accent);
+        font-variant-numeric: tabular-nums;
+      }
+      .ticker .sep { width: 26px; height: 1px; background: rgba(255,255,255,0.28); transform: translateY(-3px); }
+      .ticker .act { font-size: 11px; letter-spacing: 0.34em; color: var(--color-ink-dim); }
+
+      .sound {
+        position: absolute; right: var(--space-lg); bottom: var(--space-xl);
+        pointer-events: auto; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 9px;
+        padding: 9px 15px; border-radius: 999px;
+        background: rgba(12, 14, 16, 0.42); backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.2em;
+        text-transform: uppercase; color: var(--color-ink-dim);
+        transition: border-color 0.2s ease, color 0.2s ease;
+      }
+      .sound:hover { border-color: var(--color-accent); }
+      .sound .eq { display: inline-flex; align-items: flex-end; gap: 2px; height: 11px; }
+      .sound .eq i { width: 2px; height: 4px; background: currentColor; border-radius: 1px; }
+      .sound.on { color: var(--color-glow); border-color: var(--color-glow); }
+      .sound.on .eq i { animation: eq 0.7s ease-in-out infinite alternate; }
+      .sound.on .eq i:nth-child(2){ animation-delay: .15s } .sound.on .eq i:nth-child(3){ animation-delay: .3s }
+      .sound .lbl-off { display: inline; } .sound .lbl-on { display: none; }
+      .sound.on .lbl-off { display: none; } .sound.on .lbl-on { display: inline; }
+      @keyframes eq { from { height: 3px } to { height: 11px } }
+
       #loader {
         position: fixed; inset: 0; z-index: 3; display: grid; place-items: center;
         background: var(--color-bg); transition: opacity 0.5s ease;
@@ -89,8 +123,10 @@
         .brand, .name { left: var(--space-md); }
         .brand { top: var(--space-md); }
         .back { top: var(--space-md); right: var(--space-md); }
-        .name { bottom: 96px; }
+        .ticker { top: 58px; }
+        .name { bottom: 110px; }
         .hint { display: none; }
+        .sound { right: var(--space-md); bottom: 40px; }
       }
     </style>
   </head>
@@ -103,15 +139,24 @@
         <span class="sub">Systems</span>
       </div>
       <a class="back" href="/">← Back to live hero</a>
+      <div class="ticker">
+        <span class="num" id="hud-act">01</span>
+        <span class="sep"></span>
+        <span class="act" id="hud-act-name">REVEAL</span>
+      </div>
       <div class="name">
         <div class="tag">Real-time · cinematic reel</div>
         <h1>Meet the <em>911</em></h1>
-        <p>The GT3 RS in live Three.js — studio HDRI, clearcoat paint and real chrome. It runs a cinematic reel of hero angles; drag any time to take the wheel and orbit it yourself.</p>
+        <p>The GT3 RS in live Three.js. It runs an attract reel — studio reveal, dusk pursuit, golden-hour hero — then drag any time to take the wheel.</p>
       </div>
       <div class="hint">
         <div><span class="dot"></span>drag to take the wheel · scroll to zoom</div>
-        <div>three.js · gsap director · poly haven HDRI</div>
+        <div>three.js · gsap director · film-grade postfx</div>
       </div>
+      <button class="sound" id="sound-toggle" type="button" aria-label="Toggle sound">
+        <span class="eq"><i></i><i></i><i></i></span>
+        <span class="lbl-off">Sound off</span><span class="lbl-on">Sound on</span>
+      </button>
     </div>
 
     <div id="loader">

@@ -4,24 +4,32 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GroundedSkybox } from 'three/addons/objects/GroundedSkybox.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { gsap } from 'gsap';
 
-// Interactive GT3 RS — same car + studio HDRI as the Cycles hero, free-orbit,
-// and built to stay smooth on a phone. The home hero proves Three.js itself is
-// fine on mobile; what made the LAST model build choke were two things the home
-// never did, both removed here:
-//   1. A full mirrored GEOMETRY CLONE of the car under the floor — doubled every
-//      draw call + triangle, every frame. Gone. The floor is a glossy env-lit
-//      surface + a soft contact shadow: the showroom read, none of the cost.
-//   2. transmission glass (a separate full-scene render-target pass each frame,
-//      and wrongly applied to metal too — half the "ugly"). Gone. Windows are a
-//      cheap dark tint now.
-// This renders CONTINUOUSLY, exactly like the home hero that's confirmed smooth
-// on a phone (which carries far more — Reflector + bloom + bokeh + a shader pass).
-// An earlier build gated rendering on interaction ("render-on-demand"); on a phone
-// there's no hover to trigger the first frame, so the car + HDRI backdrop never
-// painted until you tapped. Continuous render makes "first frame shows everything"
-// true by construction. At 92 draw calls this is a fraction of the home hero's load.
+const BASE = import.meta.env.BASE_URL; // '/' in prod, './' for file:// probe builds
+
+// ============================================================================
+// JRV 911 — cinematic "attract reel" (NFS Most Wanted / Hot Pursuit grammar)
+// ----------------------------------------------------------------------------
+// A GSAP master timeline directs the camera in hard cuts through three ACTS —
+//   REVEAL  (studio)  → SPEED (dusk street, world rushing past) → HERO (sunset)
+// — each with its own colour grade, light beats, audio envelope and transition
+// vocabulary (hard cut · whip-pan motion-blur · slow-mo speed-ramp). Drag any
+// time takes the wheel (OrbitControls); idle 6s and the reel resumes.
+// Reduced-motion skips the reel entirely (gentle free-orbit, no audio, no FX).
+//
+// Honest constraint: the production GLB is ONE merged mesh (`GEO-gt3rs-merged`,
+// 84 draw calls) — there are no separate wheel nodes, so per-wheel spin is not
+// possible without a wheel-separated re-export. Speed is sold the way NFS sells
+// it: the world scrolls under a near-static car + motion blur + speed lines +
+// camera ramps. Lights DO pulse (real emissive beats by material name).
+// ============================================================================
 
 const canvas = document.getElementById('scene');
 const loaderEl = document.getElementById('loader');
@@ -29,29 +37,24 @@ const pctEl = document.getElementById('pct');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const isMobile = matchMedia('(max-width: 820px), (pointer: coarse)').matches;
 
-// hard cap pixel ratio — full retina (3x) on a phone is the #1 silent perf sink
+// HUD elements (added in model.html). Guarded so the scene runs without them.
+const hudAct = document.getElementById('hud-act');
+const hudActName = document.getElementById('hud-act-name');
+const soundBtn = document.getElementById('sound-toggle');
+
 const DPR = Math.min(window.devicePixelRatio, isMobile ? 1.5 : 1.75);
 
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, alpha: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(DPR);
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.toneMapping = THREE.NeutralToneMapping; // matches the AgX hero grade far better than ACES
-renderer.toneMappingExposure = 1.15; // brighter, warm studio like the Cycles reference (was a gloomy 0.95)
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.15;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-
-
-// The studio scenery (windows, plant, louvre doors, polished floor) IS the HDRI.
-// A FLAT equirect background never blends with a separate floor plane: the
-// backdrop's floor meets your geometry floor at the horizon as a hard seam (the
-// exact "scene/floor/car don't blend" bug). The fix is a GroundedSkybox — it
-// bends the HDRI's lower hemisphere DOWN into a flat ground that the car sits
-// on, so room + floor + car are one continuous lit space, like the render.
-// Built in the RGBELoader callback below. A neutral fill shows until it loads.
 scene.background = new THREE.Color(0x141414);
 
-const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.05, 200);
+const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.05, 400);
 camera.position.set(4.2, 1.6, 5.2);
 
 const controls = new OrbitControls(camera, canvas);
@@ -59,26 +62,18 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 2.4;
 controls.maxDistance = 14;
-controls.maxPolarAngle = Math.PI * 0.49; // stay above the floor (never see under the car)
+controls.maxPolarAngle = Math.PI * 0.49;
 controls.autoRotateSpeed = 0.5;
-// The cinematic reel owns the idle camera, NOT auto-rotate. Auto-rotate only
-// survives as the reduced-motion fallback (no reel, gentle spin like before).
 controls.autoRotate = reduceMotion;
 controls.enabled = true;
 
-// the HDRI does ~all the lighting; a faint cool rim keeps the back edge alive.
 const rim = new THREE.DirectionalLight(0xbfd0ff, 0.3);
 rim.position.set(-6, 4, -5);
 scene.add(rim);
 
-// NO separate floor mesh. The car sits directly on the GroundedSkybox's own
-// projected ground — which IS the studio floor texture (already a polished,
-// reflective-looking surface in the HDRI), so it's tone-matched by construction
-// and blends with zero seam. An opaque disc was darker than the projected floor
-// and re-introduced the exact seam we're killing; a black gloss layer would dim
-// it the same way. Grounding comes from the contact shadow below — that's it.
-
-// --- soft contact shadow under the car (grounds it; reads premium) ---
+// ---------------------------------------------------------------------------
+// Contact shadow (grounds the car on whatever floor the current act shows).
+// ---------------------------------------------------------------------------
 function shadowTexture() {
   const s = 256, c = document.createElement('canvas');
   c.width = c.height = s;
@@ -99,29 +94,99 @@ contact.position.y = 0.004;
 contact.renderOrder = 2;
 scene.add(contact);
 
-// --- IBL + grounded backdrop: the exact studio HDRI used by the Cycles render ---
-// Yaw (radians) chosen so a furnished, warm part of the room sits behind the car
-// at the default camera view (orbiting reveals the rest). The SAME yaw is applied
-// to the lighting so reflections line up with what's visible.
+// ---------------------------------------------------------------------------
+// ROAD (the SPEED / HERO act ground): a wet-asphalt plane whose texture scrolls
+// under the near-static car to sell velocity. Procedural canvas = zero asset
+// fetch, fully reliable. Hidden (opacity 0) until the SPEED act fades it in.
+// ---------------------------------------------------------------------------
+function roadTexture() {
+  const w = 256, h = 1024, c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  // dark wet asphalt with a subtle vertical sheen
+  const base = ctx.createLinearGradient(0, 0, w, 0);
+  base.addColorStop(0, '#0a0c10'); base.addColorStop(0.5, '#15181e'); base.addColorStop(1, '#0a0c10');
+  ctx.fillStyle = base; ctx.fillRect(0, 0, w, h);
+  // speckle for tarmac grain
+  for (let i = 0; i < 2600; i++) {
+    const x = Math.random() * w, y = Math.random() * h, a = Math.random() * 0.06;
+    ctx.fillStyle = `rgba(255,255,255,${a})`;
+    ctx.fillRect(x, y, 1, 1);
+  }
+  // dashed centre line (warm, picks up the JRV orange under bloom)
+  ctx.fillStyle = 'rgba(241,88,40,0.92)';
+  const dash = 120, gap = 110;
+  for (let y = -dash; y < h + dash; y += dash + gap) ctx.fillRect(w / 2 - 5, y, 10, dash);
+  // solid lane edges
+  ctx.fillStyle = 'rgba(230,230,230,0.5)';
+  ctx.fillRect(26, 0, 5, h); ctx.fillRect(w - 31, 0, 5, h);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(1, 8);
+  t.anisotropy = 8;
+  return t;
+}
+const roadTex = roadTexture();
+const road = new THREE.Mesh(
+  new THREE.PlaneGeometry(26, 320),
+  new THREE.MeshPhysicalMaterial({
+    map: roadTex, roughness: 0.34, metalness: 0.0, clearcoat: 0.6, clearcoatRoughness: 0.3,
+    transparent: true, opacity: 0,
+  })
+);
+road.rotateX(-Math.PI / 2);
+road.position.y = 0.0;
+road.renderOrder = -1;
+road.visible = false;
+scene.add(road);
+
+// gradient backdrop (dome) for the SPEED/HERO acts — replaces the studio skybox.
+function skyDomeTexture(top, bottom) {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 256;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  g.addColorStop(0, top); g.addColorStop(1, bottom);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 4, 256);
+  return new THREE.CanvasTexture(c);
+}
+const dome = new THREE.Mesh(
+  new THREE.SphereGeometry(160, 32, 16),
+  new THREE.MeshBasicMaterial({ map: skyDomeTexture('#10131c', '#241a16'), side: THREE.BackSide, transparent: true, opacity: 0, depthWrite: false })
+);
+dome.visible = false;
+scene.add(dome);
+
+// ---------------------------------------------------------------------------
+// IBL: studio HDRI (REVEAL) as a GroundedSkybox + sunset HDRI (SPEED/HERO) env.
+// ---------------------------------------------------------------------------
 const ENV_YAW = 2.2;
-// GroundedSkybox geometry: `height` = how high the photographer's camera was
-// (bigger => the floor reads flatter/further); `radius` = dome size (camera must
-// stay inside). Tuned to the car's ~4.5 m scale; verified by screenshot below.
 const SKY_HEIGHT = 6;
 const SKY_RADIUS = 90;
-new RGBELoader().load('/model/brown_photostudio_02_2k.hdr', (hdr) => {
-  hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = hdr;                 // lights the car + feeds reflections
-  scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
+let studioSky = null;
+let studioEnv = null;
+let sunsetEnv = null;
 
-  // ground-projected studio = the visible backdrop AND a flat floor at y=0 the
-  // car sits on. One continuous space — no horizon seam.
-  const sky = new GroundedSkybox(hdr, SKY_HEIGHT, SKY_RADIUS);
-  sky.position.y = SKY_HEIGHT;             // puts the projected ground at y=0
-  sky.rotation.y = ENV_YAW;                // match the lighting yaw
-  sky.renderOrder = 0;
-  scene.add(sky);
-  scene.background = null;                  // the skybox mesh is the backdrop now
+const rgbe = new RGBELoader();
+rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  studioEnv = hdr;
+  scene.environment = hdr;
+  scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
+  studioSky = new GroundedSkybox(hdr, SKY_HEIGHT, SKY_RADIUS);
+  studioSky.position.y = SKY_HEIGHT;
+  studioSky.rotation.y = ENV_YAW;
+  studioSky.renderOrder = 0;
+  studioSky.material.transparent = true;   // so we can crossfade it out for the drive
+  scene.add(studioSky);
+  scene.background = null;
+  // if the reel already left the studio before this finished loading, keep it hidden
+  if (currentAct && currentAct !== 'reveal') { studioSky.visible = false; studioSky.material.opacity = 0; }
+});
+rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
+  hdr.mapping = THREE.EquirectangularReflectionMapping;
+  sunsetEnv = hdr;   // used as the reflection env in SPEED/HERO acts
+  // if we're already in a street act, switch reflections to it now
+  if (currentAct && currentAct !== 'reveal') scene.environment = hdr;
 });
 
 function frameObject(target) {
@@ -130,9 +195,6 @@ function frameObject(target) {
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.z) || 1;
   const aspect = window.innerWidth / window.innerHeight;
-  // On portrait phones the horizontal car would crop at the roof/wing — pull the
-  // camera back as the viewport narrows so the whole car always fits, and raise
-  // the look-target so the body-copy panel at the bottom never sits on the car.
   const portraitPad = aspect < 1 ? (1.45 / aspect) : 1.45;
   const dist = maxDim * Math.min(portraitPad, 2.6);
   const lift = aspect < 1 ? maxDim * 0.55 : maxDim * 0.34;
@@ -145,8 +207,10 @@ function frameObject(target) {
   contact.position.set(center.x, 0.004, center.z);
 }
 
-// nudge the exported PBR toward the hero look by material name. No transmission
-// anywhere — glass is a cheap dark tint, metal is real metal (not see-through).
+// collect light materials for the emissive beats (verified names from the GLB)
+const headMats = [];   // headlights + DRL (cool white)
+const tailMats = [];   // tail + brake (red)
+
 function tuneMaterials(root) {
   root.traverse((n) => {
     if (!n.isMesh || !n.material) return;
@@ -154,53 +218,251 @@ function tuneMaterials(root) {
     for (const m of mats) {
       const name = (m.name || '').toLowerCase();
       if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
-        m.clearcoat = 1.0; m.clearcoatRoughness = 0.08;
-        m.roughness = Math.min(m.roughness ?? 0.4, 0.3);
-        m.envMapIntensity = 1.15;
-        // --- iridescent thin-film paint (native MeshPhysicalMaterial layer) ---
-        // A real thin-film interference coat over the paint: reflections shift
-        // hue with viewing angle (oil-slick / pearlescent wrap), strongest at
-        // grazing angles. Needs the env map (we have the studio HDRI) to read.
+        m.clearcoat = 1.0; m.clearcoatRoughness = 0.03;
+        m.roughness = Math.min(m.roughness ?? 0.4, 0.12);
+        m.envMapIntensity = 1.5;
+        // iridescent thin-film paint (kept — Rj's call): hue shifts with angle.
         m.iridescence = 1.0;
-        m.iridescenceIOR = 1.3;               // film refractive index (1.0–2.33)
-        m.iridescenceThicknessRange = [130, 720]; // nm — wide range = full spectrum sweep
-        // a darker, lower-sat base lets the interference colours dominate the
-        // surface instead of being washed out by a bright body colour.
+        m.iridescenceIOR = 1.3;
+        m.iridescenceThicknessRange = [130, 720];
         if (m.color) m.color.lerp(new THREE.Color(0x0b0d12), 0.55);
         m.metalness = Math.max(m.metalness ?? 0, 0.6);
       } else if (/chrome|mirror|metal/.test(name)) {
         m.metalness = 1.0; m.roughness = Math.min(m.roughness ?? 0.1, 0.12);
         m.envMapIntensity = 1.4;
-        if ('transmission' in m) { m.transmission = 0; m.transparent = false; } // undo stray glass on metal
+        if ('transmission' in m) { m.transmission = 0; m.transparent = false; }
       } else if (/glass|window|windscreen|windshield/.test(name)) {
-        // cheap tinted glass — NO transmission (that pass is what killed mobile)
         if ('transmission' in m) m.transmission = 0;
         m.metalness = 0; m.roughness = 0.08;
         m.color = new THREE.Color(0x0a0d12);
         m.envMapIntensity = 1.3; m.transparent = true; m.opacity = 0.46;
       } else if (/rubber|tyre|tire|trim/.test(name)) {
         m.metalness = 0.0; m.roughness = Math.max(m.roughness ?? 0.6, 0.7);
-      } else if (/led|light|backlight|tail/.test(name)) {
-        m.emissiveIntensity = Math.max(m.emissiveIntensity ?? 1, 2.4);
+      }
+      // --- light groups: set an emissive COLOUR so the beats actually read ---
+      if (/headlight|head_light|drl|led_lights/.test(name)) {
+        m.emissive = new THREE.Color(0xfff1dc);
+        m.emissiveIntensity = 1.4;
+        headMats.push(m);
+      } else if (/taillight|tail_light|backlight|brake/.test(name) || /(^|_)red(\.|$|_)/.test(name)) {
+        m.emissive = new THREE.Color(0xff1414);
+        m.emissiveIntensity = 1.6;
+        tailMats.push(m);
       }
       m.needsUpdate = true;
     }
   });
 }
 
+// pulse a light group — used on shot beats (headlight ignition, brake flare)
+function beat(group, peak, dur = 0.45) {
+  if (!group.length) return;
+  const o = { v: group[0].emissiveIntensity };
+  gsap.to(o, {
+    v: peak, duration: dur * 0.35, ease: 'power3.out', yoyo: true, repeat: 1,
+    onUpdate: () => { for (const m of group) m.emissiveIntensity = o.v; },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// POST-PROCESSING — the film look. Chain:
+//   RenderPass → Bloom (lights/sun) → Afterimage (motion blur on whips)
+//   → Grade (tint/contrast/sat/vignette/grain/chromatic-aberration) → Output
+// Mobile drops the afterimage pass and runs bloom at lower strength.
+// ---------------------------------------------------------------------------
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(DPR);
+composer.setSize(window.innerWidth, window.innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+
+const bloom = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  isMobile ? 0.32 : 0.42,   // strength — restrained, so it's a glow not a wash
+  0.5,                      // radius
+  0.92                      // threshold — ONLY genuine highlights (lights/sun) bloom,
+);                          // not the bright metallic paint reflecting the studio
+composer.addPass(bloom);
+
+let afterimage = null;
+if (!isMobile) {
+  afterimage = new AfterimagePass(0.0);   // damp animated up during whip-pans
+  composer.addPass(afterimage);
+}
+
+// colour-grade + grain + vignette + chromatic aberration (the per-act mood)
+const GradeShader = {
+  uniforms: {
+    tDiffuse: { value: null },
+    uTint: { value: new THREE.Color(1, 1, 1) },
+    uLift: { value: new THREE.Color(0, 0, 0) },
+    uContrast: { value: 1.0 },
+    uSaturation: { value: 1.0 },
+    uVignette: { value: 0.28 },
+    uGrain: { value: 0.04 },
+    uCA: { value: 0.0 },          // chromatic aberration (px-ish, anim on ramps)
+    uTime: { value: 0 },
+    uRes: { value: new THREE.Vector2(1, 1) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    varying vec2 vUv;
+    uniform sampler2D tDiffuse;
+    uniform vec3 uTint, uLift;
+    uniform float uContrast, uSaturation, uVignette, uGrain, uCA, uTime;
+    uniform vec2 uRes;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+    void main(){
+      vec2 uv = vUv;
+      vec2 d = uv - 0.5;
+      // chromatic aberration: split channels radially (stronger toward edges)
+      float ca = uCA / max(uRes.x, 1.0);
+      vec3 col;
+      col.r = texture2D(tDiffuse, uv + d * ca * 1.0).r;
+      col.g = texture2D(tDiffuse, uv).g;
+      col.b = texture2D(tDiffuse, uv - d * ca * 1.0).b;
+      // lift + tint + contrast
+      col = col + uLift;
+      col *= uTint;
+      col = (col - 0.5) * uContrast + 0.5;
+      // saturation
+      float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col = mix(vec3(l), col, uSaturation);
+      // vignette
+      float vig = smoothstep(0.9, 0.25, length(d) * (1.0 + uVignette));
+      col *= mix(1.0 - uVignette, 1.0, vig);
+      // film grain
+      float g = (hash(uv * uRes + uTime) - 0.5) * uGrain;
+      col += g;
+      gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+    }
+  `,
+};
+const grade = new ShaderPass(GradeShader);
+grade.uniforms.uRes.value.set(window.innerWidth * DPR, window.innerHeight * DPR);
+composer.addPass(grade);
+composer.addPass(new OutputPass());
+
+// per-act grade presets (gsap tweens uniforms between them on each act change)
+const GRADES = {
+  reveal: { tint: 0xfff2e6, lift: 0x040404, contrast: 1.04, sat: 1.04, vig: 0.26, grain: 0.03, ca: 0.0 },
+  speed:  { tint: 0xbfe0ff, lift: 0x0a0600, contrast: 1.18, sat: 1.16, vig: 0.42, grain: 0.08, ca: 1.6 },
+  hero:   { tint: 0xffd9a8, lift: 0x0c0602, contrast: 1.08, sat: 1.14, vig: 0.30, grain: 0.04, ca: 0.4 },
+};
+function applyGrade(name, dur = 1.0) {
+  const g = GRADES[name]; if (!g) return;
+  const tintC = new THREE.Color(g.tint), liftC = new THREE.Color(g.lift);
+  gsap.to(grade.uniforms.uTint.value, { r: tintC.r, g: tintC.g, b: tintC.b, duration: dur, ease: 'power2.inOut' });
+  gsap.to(grade.uniforms.uLift.value, { r: liftC.r, g: liftC.g, b: liftC.b, duration: dur, ease: 'power2.inOut' });
+  gsap.to(grade.uniforms.uContrast, { value: g.contrast, duration: dur });
+  gsap.to(grade.uniforms.uSaturation, { value: g.sat, duration: dur });
+  gsap.to(grade.uniforms.uVignette, { value: g.vig, duration: dur });
+  gsap.to(grade.uniforms.uGrain, { value: g.grain, duration: dur });
+  gsap.to(grade.uniforms.uCA, { value: g.ca, duration: dur });
+}
+
+// ---------------------------------------------------------------------------
+// WORLD / ACT state — crossfade between the studio (REVEAL) and the dusk/sunset
+// street (SPEED/HERO). Driven by act-change callbacks on the timeline.
+// ---------------------------------------------------------------------------
+let roadSpeed = 0;            // texture scroll rate (anim per act)
+let currentAct = null;
+const ACT_LABELS = { reveal: 'REVEAL', speed: 'PURSUIT', hero: 'GOLDEN HOUR' };
+const ACT_NUM = { reveal: '01', speed: '02', hero: '03' };
+
+function setAct(name) {
+  if (name === currentAct) return;
+  currentAct = name;
+  applyGrade(name, 1.1);
+  if (hudActName) hudActName.textContent = ACT_LABELS[name] || '';
+  if (hudAct) hudAct.textContent = ACT_NUM[name] || '';
+
+  if (name === 'reveal') {
+    if (studioEnv) scene.environment = studioEnv;
+    road.visible = true;
+    gsap.to(road.material, { opacity: 0, duration: 0.8, onComplete: () => { road.visible = false; } });
+    gsap.to(dome.material, { opacity: 0, duration: 0.8, onComplete: () => { dome.visible = false; } });
+    if (studioSky) { studioSky.visible = true; gsap.to(studioSky.material, { opacity: 1, duration: 1.0 }); }
+    setRoadSpeed(0);
+    setEngineSpeed(0.85);
+  } else {
+    // SPEED + HERO: dusk/sunset street. Fade the studio out, road + dome in.
+    if (sunsetEnv) scene.environment = sunsetEnv;
+    if (studioSky) gsap.to(studioSky.material, { opacity: 0, duration: 0.9, onComplete: () => { studioSky.visible = false; } });
+    if (scene.background) scene.background = null;
+    dome.visible = true;
+    road.visible = true;
+    // dusk vs golden-hour dome tint
+    const top = name === 'hero' ? '#1a1410' : '#0e1119';
+    const bot = name === 'hero' ? '#7a3d1c' : '#3a221a';
+    dome.material.map = skyDomeTexture(top, bot);
+    dome.material.map.needsUpdate = true;
+    gsap.to(dome.material, { opacity: 1, duration: 1.0 });
+    gsap.to(road.material, { opacity: 1, duration: 0.9 });
+    if (name === 'speed') { setRoadSpeed(2.4); setEngineSpeed(1.85); }
+    else { setRoadSpeed(0.6); setEngineSpeed(1.15); }
+  }
+}
+function setRoadSpeed(v) { gsap.to({ s: roadSpeed }, { s: v, duration: 1.0, onUpdate() { roadSpeed = this.targets()[0].s; } }); }
+
+// ---------------------------------------------------------------------------
+// AUDIO — engine loop (playbackRate = speed envelope) + tyre screech on the
+// brake beat. Gated behind a user gesture (autoplay policy). Starts muted; the
+// HUD sound toggle (or first drag) enables it.
+// ---------------------------------------------------------------------------
+let audioOn = false;
+let engine = null, screech = null;
+function initAudio() {
+  if (engine) return;
+  engine = new Audio(`${BASE}audio/engine.mp3`); engine.loop = true; engine.volume = 0.0; engine.preload = 'auto';
+  screech = new Audio(`${BASE}audio/screech.mp3`); screech.volume = 0.0; screech.preload = 'auto';
+}
+function enableAudio() {
+  initAudio();
+  audioOn = true;
+  engine.play().catch(() => {});
+  gsap.to(engine, { volume: 0.32, duration: 1.2 });
+  if (soundBtn) soundBtn.classList.add('on');
+}
+function disableAudio() {
+  audioOn = false;
+  if (engine) gsap.to(engine, { volume: 0, duration: 0.4, onComplete: () => engine.pause() });
+  if (screech) screech.pause();
+  if (soundBtn) soundBtn.classList.remove('on');
+}
+function setEngineSpeed(rate) {
+  if (!engine) return;
+  gsap.to(engine, { playbackRate: rate, duration: 1.2, ease: 'power2.inOut' });
+}
+function playScreech() {
+  if (!audioOn || !screech) return;
+  try { screech.currentTime = 0.3; screech.volume = 0.0; screech.play().catch(() => {}); } catch (e) {}
+  gsap.to(screech, { volume: 0.45, duration: 0.1, yoyo: true, repeat: 1,
+    onComplete: () => { try { screech.pause(); } catch (e) {} } });
+}
+if (soundBtn) {
+  soundBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    audioOn ? disableAudio() : enableAudio();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// LOAD THE CAR
+// ---------------------------------------------------------------------------
 const draco = new DRACOLoader();
 draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 const gltf = new GLTFLoader();
 gltf.setDRACOLoader(draco);
 gltf.load(
-  '/model/porsche-gt3rs.glb',
+  `${BASE}model/porsche-gt3rs.glb`,
   (data) => {
     const root = data.scene;
-    // strip the stray export Cube (default-cube artifact, not part of the car)
     const stray = root.getObjectByName('Cube');
     if (stray) stray.parent.remove(stray);
 
-    // wheels on the floor (y=0)
     const pre = new THREE.Box3().setFromObject(root);
     root.position.y -= pre.min.y;
 
@@ -208,70 +470,73 @@ gltf.load(
     scene.add(root);
     frameObject(root);
 
-    // build the cinematic reel around the car's actual bounds
     const fitted = new THREE.Box3().setFromObject(root);
     const fc = fitted.getCenter(new THREE.Vector3());
     const fs = fitted.getSize(new THREE.Vector3());
     const fr = Math.max(fs.x, fs.z) || 1;
-    // seed the proxy at the interactive default frame so frame-0 of the reel is clean
     cam.tx = controls.target.x; cam.ty = controls.target.y; cam.tz = controls.target.z;
     cam.px = camera.position.x; cam.py = camera.position.y; cam.pz = camera.position.z;
     cam.fov = camera.fov;
     director = buildDirector(fc, fr);
+    if (mode !== 'reel') applyGrade('reveal', 0); else setAct('reveal');
+
+    // verification hook: ?t=<seconds> pauses the reel at an absolute timeline
+    // position (and forces the matching act) so each act can be captured
+    // deterministically regardless of load time. No effect in normal use.
+    const seek = parseFloat(new URLSearchParams(location.search).get('t'));
+    if (!Number.isNaN(seek) && director) {
+      const act = seek < 6.7 ? 'reveal' : seek < 16 ? 'speed' : 'hero';
+      setAct(act);
+      director.pause();
+      director.time(seek);
+    }
 
     if (loaderEl) {
       loaderEl.classList.add('gone');
       setTimeout(() => loaderEl.remove(), 600);
     }
   },
-  (e) => {
-    if (e.lengthComputable && pctEl) pctEl.textContent = String(Math.round((e.loaded / e.total) * 100));
-  },
-  (err) => {
-    console.error('GLB load failed', err);
-    if (pctEl) pctEl.textContent = 'ERR';
-  }
+  (e) => { if (e.lengthComputable && pctEl) pctEl.textContent = String(Math.round((e.loaded / e.total) * 100)); },
+  (err) => { console.error('GLB load failed', err); if (pctEl) pctEl.textContent = 'ERR'; }
 );
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloom.setSize(window.innerWidth, window.innerHeight);
+  grade.uniforms.uRes.value.set(window.innerWidth * DPR, window.innerHeight * DPR);
 });
 
-// --- CINEMATIC DIRECTOR -----------------------------------------------------
-// An NFS-style attract reel: on load the camera hard-cuts between hero angles on
-// a GSAP master timeline. Touch/drag any time hands you the wheel (OrbitControls);
-// idle for IDLE_MS and the reel resumes. Reduced-motion skips the reel entirely.
+// ---------------------------------------------------------------------------
+// THE DIRECTOR — shots grouped into acts, each with a transition + beats.
+// ---------------------------------------------------------------------------
 const IDLE_MS = 6000;
-let mode = reduceMotion ? 'control' : 'reel';   // 'reel' = director drives | 'control' = user drives
+let mode = reduceMotion ? 'control' : 'reel';
 let director = null;
 let idleT = 0;
 
-// camera proxy the timeline writes to; the tick reads it (+ handheld noise) onto
-// the real camera. Decoupling means OrbitControls and the director never fight
-// over camera.position in the same frame.
 const cam = { px: 4.2, py: 1.6, pz: 5.2, tx: 0, ty: 0.6, tz: 0, fov: 38 };
 
-// A shot = framing relative to the car's centre `c` and radius `r` (its longest
-// horizontal dimension). Offsets are multiples of r so the reel reframes to any
-// model. `dur`/`ease` shape the in-shot move; the cut between shots is a hard set.
+// shot: framing relative to car centre `c` / radius `r`. act drives the world +
+// grade; transition: 'cut' (default) | 'whip' (motion-blur pre-roll) | 'ramp'
+// (slow-mo). beat: 'head' | 'brake' fired at the shot's start.
 function buildShots(c, r) {
   const at = (ox, oy, oz) => [c.x + ox * r, c.y + oy * r, c.z + oz * r];
   const tgt = (oy = 0.0) => [c.x, c.y + oy * r, c.z];
   return [
-    // 1 — front-3/4 low push-in (the reveal)
-    { from: at(0.55, 0.16, 1.95), to: at(0.42, 0.22, 1.30), look: tgt(0.02), lookTo: tgt(0.04), fov: 36, fovTo: 30, dur: 2.6, ease: 'power2.out' },
-    // 2 — wheel-level flank track
-    { from: at(-1.55, 0.10, 0.55), to: at(-1.55, 0.12, -0.65), look: tgt(0.05), fov: 42, fovTo: 42, dur: 2.4, ease: 'none' },
-    // 3 — fast top-down drop onto roof + wing
-    { from: at(0.15, 2.05, 0.70), to: at(0.08, 1.45, 0.38), look: tgt(0.0), fov: 46, fovTo: 40, dur: 1.7, ease: 'power3.inOut' },
-    // 4 — rear-3/4 chase push
-    { from: at(1.35, 0.50, -1.65), to: at(1.05, 0.46, -1.25), look: tgt(0.10), fov: 50, fovTo: 42, dur: 2.6, ease: 'power2.out' },
-    // 5 — side profile slow dolly
-    { from: at(1.95, 0.32, -0.25), to: at(1.95, 0.34, 0.45), look: tgt(0.06), fov: 32, fovTo: 32, dur: 2.2, ease: 'none' },
-    // 6 — crane-up to full hero 3/4 (settles toward the interactive default)
-    { from: at(1.25, 0.42, 1.35), to: at(1.45, 0.98, 1.60), look: tgt(0.10), lookTo: tgt(0.16), fov: 36, fovTo: 30, dur: 2.9, ease: 'power2.inOut' },
+    // ===== ACT I — REVEAL (studio) =====
+    { act: 'reveal', beat: 'head', from: at(0.55, 0.16, 1.95), to: at(0.42, 0.22, 1.30), look: tgt(0.02), lookTo: tgt(0.04), fov: 36, fovTo: 30, dur: 2.6, ease: 'power2.out' },
+    { act: 'reveal', from: at(-1.55, 0.10, 0.55), to: at(-1.55, 0.12, -0.65), look: tgt(0.05), fov: 42, fovTo: 42, dur: 2.4, ease: 'none' },
+    { act: 'reveal', transition: 'whip', from: at(0.15, 2.05, 0.70), to: at(0.08, 1.45, 0.38), look: tgt(0.0), fov: 46, fovTo: 40, dur: 1.7, ease: 'power3.inOut' },
+    // ===== ACT II — PURSUIT (dusk street, world rushing) =====
+    { act: 'speed', transition: 'whip', beat: 'head', from: at(1.35, 0.50, -1.65), to: at(1.05, 0.46, -1.25), look: tgt(0.10), fov: 56, fovTo: 46, dur: 2.6, ease: 'power2.out' },
+    { act: 'speed', from: at(1.95, 0.26, -0.25), to: at(1.95, 0.30, 0.55), look: tgt(0.06), fov: 36, fovTo: 36, dur: 2.0, ease: 'none' },
+    { act: 'speed', transition: 'ramp', beat: 'brake', from: at(-1.7, 0.30, 0.30), to: at(-1.55, 0.36, -0.30), look: tgt(0.06), fov: 40, fovTo: 34, dur: 2.4, ease: 'power3.out' },
+    // ===== ACT III — GOLDEN HOUR (sunset hero) =====
+    { act: 'hero', transition: 'whip', from: at(1.25, 0.32, -1.45), to: at(1.05, 0.40, -1.15), look: tgt(0.08), fov: 34, fovTo: 30, dur: 2.4, ease: 'power2.out' },
+    { act: 'hero', from: at(1.25, 0.42, 1.35), to: at(1.55, 1.05, 1.70), look: tgt(0.10), lookTo: tgt(0.18), fov: 36, fovTo: 28, dur: 3.0, ease: 'power2.inOut' },
   ];
 }
 
@@ -280,32 +545,46 @@ function buildDirector(c, r) {
   const tl = gsap.timeline({ repeat: -1, paused: mode !== 'reel' });
   for (const s of shots) {
     const L0 = s.look, L1 = s.lookTo || s.look;
-    // hard CUT: jump the proxy to the shot's start framing instantly...
-    tl.set(cam, {
-      px: s.from[0], py: s.from[1], pz: s.from[2],
-      tx: L0[0], ty: L0[1], tz: L0[2], fov: s.fov,
+    // act + beat fire at the cut
+    tl.call(() => {
+      setAct(s.act);
+      if (s.beat === 'head') beat(headMats, 6.0, 0.5);
+      if (s.beat === 'brake') { beat(tailMats, 7.0, 0.6); playScreech(); }
+      // whip-pan: spike the motion-blur damp, then ease it back down
+      if (afterimage) {
+        if (s.transition === 'whip') {
+          afterimage.uniforms.damp.value = 0.82;
+          gsap.to(afterimage.uniforms.damp, { value: 0.0, duration: 0.9, ease: 'power2.out' });
+        } else if (s.transition === 'ramp') {
+          afterimage.uniforms.damp.value = 0.55;
+          gsap.to(afterimage.uniforms.damp, { value: 0.0, duration: 1.3, ease: 'power2.out' });
+        }
+      }
     });
-    // ...then ride the in-shot move.
+    // hard CUT to the shot's start framing
+    tl.set(cam, { px: s.from[0], py: s.from[1], pz: s.from[2], tx: L0[0], ty: L0[1], tz: L0[2], fov: s.fov });
+    // slow-mo ramp dilates the in-shot move
+    const dur = s.transition === 'ramp' ? s.dur * 1.5 : s.dur;
     tl.to(cam, {
-      px: s.to[0], py: s.to[1], pz: s.to[2],
-      tx: L1[0], ty: L1[1], tz: L1[2], fov: s.fovTo,
-      duration: s.dur, ease: s.ease,
+      px: s.to[0], py: s.to[1], pz: s.to[2], tx: L1[0], ty: L1[1], tz: L1[2], fov: s.fovTo,
+      duration: dur, ease: s.ease,
     });
   }
   return tl;
 }
 
-// hand control to the user the instant they touch the scene
+// ---------------------------------------------------------------------------
+// CONTROL HANDOFF
+// ---------------------------------------------------------------------------
 function takeControl() {
   if (reduceMotion || mode === 'control') { clearTimeout(idleT); return; }
   mode = 'control';
   if (director) director.pause();
-  controls.target.set(cam.tx, cam.ty, cam.tz); // seamless: orbit from where the reel left off
+  controls.target.set(cam.tx, cam.ty, cam.tz);
   camera.position.set(cam.px, cam.py, cam.pz);
   camera.fov = cam.fov; camera.updateProjectionMatrix();
   controls.update();
 }
-// return to the reel after the user goes idle
 function scheduleResume() {
   if (reduceMotion) return;
   clearTimeout(idleT);
@@ -315,32 +594,35 @@ canvas.addEventListener('pointerdown', takeControl);
 controls.addEventListener('start', takeControl);
 controls.addEventListener('end', scheduleResume);
 
-// device-independent per-frame cost probe (honest measure on a GPU-less box)
 window.__info = () => ({
   calls: renderer.info.render.calls,
   tris: renderer.info.render.triangles,
   geometries: renderer.info.memory.geometries,
+  act: currentAct,
 });
 
-// --- continuous render loop --------------------------------------------------
-// Renders every frame, just like the home hero confirmed smooth on a phone. No
-// interaction-gating: the car, the studio backdrop and the idle auto-spin are all
-// visible the instant the page loads — nothing waits for a tap.
+// ---------------------------------------------------------------------------
+// RENDER LOOP
+// ---------------------------------------------------------------------------
 let t = 0;
 function tick() {
   t += 0.016;
+  grade.uniforms.uTime.value = t;
+  // scroll the road to sell speed (only matters when it's visible)
+  if (roadSpeed > 0.001) roadTex.offset.y -= roadSpeed * 0.016;
+
   if (mode === 'control') {
-    controls.update();      // user drives: damping + (reduced-motion) idle spin
+    controls.update();
   } else {
-    // reel drives: read the GSAP proxy onto the camera, plus a faint handheld
-    // sway so no shot is ever dead-static (the thing that reads "gaming movie").
-    const nx = Math.sin(t * 0.7) * 0.012;
-    const ny = Math.cos(t * 0.9) * 0.010;
+    // handheld sway scales with the act's energy (more in PURSUIT)
+    const amp = currentAct === 'speed' ? 0.03 : 0.012;
+    const nx = Math.sin(t * 0.7) * amp;
+    const ny = Math.cos(t * 0.9) * amp * 0.8;
     camera.position.set(cam.px + nx, cam.py + ny, cam.pz);
     if (camera.fov !== cam.fov) { camera.fov = cam.fov; camera.updateProjectionMatrix(); }
     camera.lookAt(cam.tx, cam.ty, cam.tz);
   }
-  renderer.render(scene, camera);
+  composer.render();
   requestAnimationFrame(tick);
 }
 tick();
