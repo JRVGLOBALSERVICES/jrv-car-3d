@@ -39,21 +39,16 @@ const scene = new THREE.Scene();
 // render-on-demand dirty flag — set true whenever something needs a fresh frame
 let dirty = true;
 
-// --- premium gradient backdrop (radial spotlight, not a dead flat fill) ---
-function backdropTexture() {
-  const c = document.createElement('canvas');
-  c.width = 16; c.height = 512;
-  const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0.0, '#23282f');
-  g.addColorStop(0.45, '#14171c');
-  g.addColorStop(1.0, '#070809');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 16, 512);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-scene.background = backdropTexture();
+// The studio scenery (windows, winter trees, plant, polished floor) IS the HDRI.
+// We set scene.background = that same HDRI below in the RGBELoader callback so
+// the viewer shows the environment AS the backdrop — exactly like the Cycles
+// render — instead of a flat dark fill. A faint blur gives it the render's soft
+// depth-of-field; intensity is tuned so it doesn't blow out behind the car.
+// (A neutral gradient is shown until the HDRI finishes loading, to avoid a flash
+// of black.)
+scene.background = new THREE.Color(0x14171c);
+scene.backgroundBlurriness = 0.035; // slight DoF like the render, windows still read
+scene.backgroundIntensity = 0.95;
 
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.05, 200);
 camera.position.set(4.2, 1.6, 5.2);
@@ -79,7 +74,7 @@ scene.add(rim);
 //     grounds the car without a literal mirror. ---
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(60, 64),
-  new THREE.MeshStandardMaterial({ color: 0x0c0e12, roughness: 0.16, metalness: 0.92, envMapIntensity: 0.85 })
+  new THREE.MeshStandardMaterial({ color: 0x171a1f, roughness: 0.14, metalness: 0.9, envMapIntensity: 1.05 })
 );
 floor.rotateX(-Math.PI / 2);
 floor.renderOrder = 1;
@@ -107,9 +102,16 @@ contact.renderOrder = 2;
 scene.add(contact);
 
 // --- IBL: the exact studio HDRI used by the Cycles render ---
+// Yaw (radians) that brings the studio's big windows + winter trees behind the
+// car at the default camera view — so first load reads like the Cycles render,
+// not a blank wall. Orbiting reveals the rest of the room.
+const ENV_YAW = 3.1;
 new RGBELoader().load('/model/brown_photostudio_02_2k.hdr', (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
-  scene.environment = hdr;
+  scene.environment = hdr;   // lights the car + feeds reflections
+  scene.background = hdr;     // AND shows the studio scenery as the backdrop
+  scene.backgroundRotation = new THREE.Euler(0, ENV_YAW, 0);
+  scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
   dirty = true;
 });
 
