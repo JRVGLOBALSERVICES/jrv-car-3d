@@ -34,17 +34,19 @@ linear speed**, so the rims roll instead of sliding.
 - **Velocity-locked motion:** one speed `V` drives **both** the track texture scroll
   *and* the wheel angular velocity (`ω = V / wheel-radius`, radius measured from the GLB).
   No more wheels-slide-while-road-flows mismatch.
-- **Sunny racetrack:** lit + backed by the **Poly Haven Kloofendal 43d Clear (Pure Sky)**
-  HDRI (clear midday, CC0) — a hard warm sun key + cool sky fill, faint heat-haze fog. The
-  track is kerbed tarmac (red/white curbing + a worn racing line) that scrolls underneath.
+- **Most-Wanted dusk track:** lit + backed by the **Poly Haven Belfast Sunset (Pure Sky)**
+  HDRI (twilight, CC0) — a low warm raking sun + deep-blue twilight fill, cool dusk haze fog.
+  Cinematic teal-shadow / orange-highlight split so the orange car pops against the blue dome.
+  The track is kerbed tarmac (red/white curbing + a worn racing line) that scrolls underneath.
 - **Hover / tap to steer the slide:** cursor (or touch) X position steers the drift —
   left → the 911 slides left, right → slides right, centre → tracks straight. A **tap/click
   fires a throttle burst** (deeper yaw kick + a gout of extra smoke). Press-and-**drag still
   orbits the camera** (threshold-gated so a tap doesn't trigger orbit), polar-clamped so it
   never dips below the tarmac.
-- **Glossy candy clearcoat:** `MeshPhysicalMaterial` candy-metallic JRV-orange base
-  (`metalness 0.85`) under a mirror clearcoat; PBR-Neutral tonemapping keeps it saturated
-  (ACES was washing it out). Tyres forced matte black, rims machined graphite.
+- **Glossy candy clearcoat:** `MeshPhysicalMaterial` candy-metallic orange base `#ff5a1c`
+  (`metalness 0.85`, `roughness 0.30`, `envMapIntensity 3.0`) under a mirror clearcoat; the
+  dusk sky reflects hard for a wet candy gloss; PBR-Neutral tonemapping keeps it saturated.
+  Tyres forced matte black, rims machined graphite.
 - **Live energy:** headlights breathe (emissive + bloom), `HEADING nnn°` HUD reads the
   orbit angle.
 - **Reduced-motion:** skips the reveal + drift entirely — a static lit hero 3/4.
@@ -55,11 +57,11 @@ linear speed**, so the rims roll instead of sliding.
 |-------|--------|
 | 3D engine | **Three.js** `^0.171` (vanilla, ES modules) |
 | Build | **Vite** `^5` |
-| Rendering | WebGL, `NeutralToneMapping` (Khronos PBR Neutral, exposure 1.18 — keeps the candy orange saturated where ACES washed it out) + `SRGBColorSpace`, `PCFSoftShadowMap` |
-| Lighting | **IBL** via **Poly Haven `kloofendal_43d_clear_puresky` HDRI** (`RGBELoader` → `PMREMGenerator`) — clear-sky reflections; hard warm **sun** key (shadow caster) + cool sky fill + back rim + low front fill (for drag-around) + one JRV-orange accent kiss |
-| Environment | HDRI as **lightly-blurred sky backdrop** (`backgroundBlurriness 0.08` — crisper clearcoat reflections, `backgroundIntensity 0.95`, `environmentIntensity 1.35`) + faint `FogExp2(#b8c6cf, 0.012)` heat-haze |
+| Rendering | WebGL, `NeutralToneMapping` (Khronos PBR Neutral, exposure 1.06 — keeps the candy orange saturated where ACES washed it out) + `SRGBColorSpace`, `PCFSoftShadowMap` |
+| Lighting | **IBL** via **Poly Haven `belfast_sunset_puresky` HDRI** (`RGBELoader` → `PMREMGenerator`) — twilight reflections; low warm raking **sun** key (shadow caster) + deep-blue twilight fill + cold back rim + warm camera-side fill (gloss on the near flank) + one JRV-orange accent kiss |
+| Environment | HDRI as **softened dusk backdrop** (`backgroundBlurriness 0.14` so the bright horizon doesn't blow out, `backgroundIntensity 0.6`, `environmentIntensity 1.3` carries the gloss) + cool `FogExp2(#161c28, 0.02)` dusk haze |
 | Track | kerbed tarmac `CanvasTexture` (asphalt speckle + worn racing line + red/white kerbs + limit lines), `RepeatWrapping` scrolled via `offset.y` |
-| Body material | `MeshPhysicalMaterial` candy-metallic — punchy orange base, `metalness 0.85`, `roughness 0.34`, `clearcoat 1`, `clearcoatRoughness 0.03`, `envMapIntensity 2.6` (high metalness tints the reflection → rich body colour, not the muddy half-metal it was) |
+| Body material | `MeshPhysicalMaterial` candy-metallic — candy-orange base `#ff5a1c`, `metalness 0.85`, `roughness 0.30`, `clearcoat 1`, `clearcoatRoughness 0.03`, `envMapIntensity 3.0` (dusk sky reflects hard → wet candy gloss, reads orange not crimson under the grade) |
 | Reveal | state machine `load → detail → pull → drift`; real PBR from frame 0 (the rim study needs detail); `easeOutCubic` counter; white flash on snap |
 | Motion model | one linear speed `V_MAX` ramps via `speedFactor`; drives **both** `roadTex.offset` (`V / units-per-tile`) and wheel spin (`ω = V / WHEEL_R`) — locked, no sliding |
 | Drift | car yaws across a **fixed** `travelDirBase`; `driftYaw` driven by `steerCur` (hover/tap) + a faint idle weave + throttle kick + counter-roll; smoke/marks read off the fixed travel axis, not live yaw |
@@ -69,7 +71,7 @@ linear speed**, so the rims roll instead of sliding.
 | Camera | drift tracking weave (az/el/dist, leans into `steerCur`) + **pointer-event drag-orbit** with polar clamp (`0.18 … 1.46` rad) |
 | Geometry | Sketchfab GLB → `gltf-transform optimize` (Draco geometry + WebP textures) → **2.7 MB** |
 | Loading | `GLTFLoader` + `DRACOLoader` (gstatic decoder) |
-| Post | `EffectComposer` → `UnrealBloomPass` (0.24 / 0.55 / 0.9) → `OutputPass` |
+| Post | **Most-Wanted cinematic chain:** `EffectComposer` → `UnrealBloomPass` (0.34 / 0.5 / 0.9) → `OutputPass` (tonemap+sRGB) → **`CinematicShader` `ShaderPass`** — radial speed-blur + chromatic aberration (both scale with `uSpeed` + `uThrottle`), teal-shadow / orange-highlight grade, vignette, film grain. Plus a speed-rush **FOV punch** on throttle |
 | Grounding | sun cast shadow (`ShadowMaterial`) + **`Reflector` wet-tarmac mirror apron** (three.js addon, dimmed reflection under a translucent asphalt sheet → car/sky mirror in the ground) + a radial **blob contact shadow** parented to the car |
 | Host | Vercel (static `dist/`) |
 
@@ -107,14 +109,15 @@ Consulted: `design-3d-stack.md` §"Anti-AI-slop checklist", §2 (web-3D defaults
 index.html                     chrome overlay (brand, HEADING HUD, headline, credit) +
                                render-reveal counter/bar + flash, tokens link
 src/tokens.css                 JRV brand tokens (hex source of truth + OKLCH chrome)
-src/main.js                    the scene: renderer, clear-sky HDRI IBL + sky backdrop +
-                               haze, sun lighting, GLB load (real PBR) + wheel detection +
-                               measured radius, kerbed track texture, speed-locked scroll
-                               + spin, detail→pull→drift state machine, drift yaw, smoke
-                               pool, burn-mark decal pool, drag-orbit, blob shadow, bloom, HUD
+src/main.js                    the scene: renderer, dusk HDRI IBL + softened backdrop +
+                               haze, raking-sun dusk lighting, GLB load (real PBR) + wheel
+                               detection + measured radius, kerbed track texture, speed-locked
+                               scroll + spin, detail→pull→drift state machine, drift yaw, smoke
+                               pool, burn-mark decal pool, drag-orbit, blob shadow, cinematic
+                               post chain (bloom + speed-blur/chroma/grade/vignette/grain), HUD
 public/model/
   porsche-gt3rs.glb            optimized model (Draco + WebP)
-  kloofendal_43d_clear_puresky_2k.hdr   Poly Haven clear-sky HDRI (CC0) — IBL + backdrop
+  belfast_sunset_puresky_2k.hdr   Poly Haven twilight HDRI (CC0) — dusk IBL + backdrop
   license.txt                  model attribution + HDRI note
 ```
 
@@ -145,17 +148,20 @@ to JRV orange clearcoat, per-wheel hub pivots, optimized to Draco/WebP GLB).
 
 ## Environment credit
 
-HDRI: **`kloofendal_43d_clear_puresky`** from
-[Poly Haven](https://polyhaven.com/a/kloofendal_43d_clear_puresky) — **CC0** (public domain,
-no attribution required; credited as good practice). Used for image-based lighting and the
-sky backdrop.
+HDRI: **`belfast_sunset_puresky`** from
+[Poly Haven](https://polyhaven.com/a/belfast_sunset_puresky) — **CC0** (public domain,
+no attribution required; credited as good practice). Used for twilight image-based lighting
+and the dusk sky backdrop.
 
 ## References
 
 Direction supplied by Rj:
 
-- **Trackday drift (current):** open tight on the front rims with detailing, slowly pull
-  back with the rims moving, then the car drifts with smoke and burn marks on a racetrack.
-  This brief drove the current build.
+- **Need for Speed: Most Wanted look (current):** the trackday drift carried into a
+  cinematic racing-game grade — dusk twilight sky, teal/orange film colour, radial speed-blur
+  + chromatic aberration that build with speed, vignette, grain, bloom, FOV punch on throttle.
+- **Trackday drift:** open tight on the front rims with detailing, slowly pull back with the
+  rims moving, then the car drifts with smoke and burn marks on a racetrack. This brief drove
+  the build the Most-Wanted grade sits on top of.
 - **Earlier — rain reveal:** clay→full-render reveal that snapped to a wet 911 on a forest
   road with a tyre water-spray plume (superseded by the trackday concept).
