@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>JRV · 911 GT3 RS — After Dark</title>
+    <meta name="description" content="A Porsche 911 GT3 RS turns under a Berlin plaza at night — thin-film clearcoat shifting green to violet across the panels. Scroll to rotate. Rendered frame-by-frame in Blender Cycles, played back as an iOS-safe canvas scrub by JRV." />
+    <meta property="og:title" content="JRV · 911 GT3 RS — After Dark" />
+    <meta property="og:description" content="Thin-film paint under city light. A Cycles turntable you scroll to rotate." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="./seq-a/frame_000.webp" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="preload" as="image" href="./seq-a/frame_000.webp" fetchpriority="high" />
+    <link rel="stylesheet" href="/src/tokens.css" />
+    <link rel="stylesheet" href="/src/scrub.css" />
+    <style>:root { --accent: var(--color-glow); }</style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "ImageObject",
+      "name": "JRV 911 GT3 RS — After Dark turntable",
+      "creditText": "JRV",
+      "creator": { "@type": "Organization", "name": "JRV" },
+      "description": "Porsche 911 GT3 RS with thin-film iridescent paint, rendered in Blender Cycles under a Berlin night-plaza HDRI.",
+      "contentUrl": "./seq-a/frame_000.webp",
+      "license": "https://creativecommons.org/licenses/by/4.0/"
+    }
+    </script>
+  </head>
+  <body>
+    <canvas id="scene" data-seq="./seq-a" data-count="30" aria-label="Porsche 911 GT3 RS rotating under a city plaza at night. Scroll to rotate the car."></canvas>
+    <div class="scrim"></div>
+
+    <div class="chrome">
+      <div class="brand"><span class="mark">JRV<b>.</b></span><span class="sub">After Dark</span></div>
+      <a class="back" href="/index.html">← back to drift</a>
+    </div>
+    <div class="rail"><i></i></div>
+
+    <!-- editorial beats -->
+    <div class="beat at-bl on" data-at="0.0" data-span="0.16">
+      <div class="kicker">911 GT3 RS · Night plaza</div>
+      <h1>City lights,<br /><em>oil-slick</em></h1>
+      <p>Thin-film clearcoat, rendered frame-by-frame in Blender Cycles. The hue walks from green through teal to violet as the plaza light rakes the panels. Scroll to turn it.</p>
+    </div>
+
+    <div class="beat at-tr" data-at="0.34" data-span="0.16">
+      <div class="kicker">01 — Paint</div>
+      <h2>Thin-film,<br />not a sticker</h2>
+      <p>A 510-nanometre interference film over a deep-indigo base. The colour shift is physical optics — real, not a decal. This is the look real-time WebGL paint can’t reach.</p>
+    </div>
+
+    <div class="beat at-cl" data-at="0.62" data-span="0.16">
+      <div class="kicker">02 — Form</div>
+      <h2>992 profile,<br />real reflections</h2>
+      <div class="spec">
+        <div><b>4.0L</b><span>flat-six</span></div>
+        <div><b>525</b><span>hp</span></div>
+        <div><b>9k</b><span>redline rpm</span></div>
+      </div>
+      <p>Swan-neck wing, centre-lock wheels, lit by an actual Berlin plaza HDRI. Wet ground, true mirror reflections — no faked floor.</p>
+    </div>
+
+    <div class="beat at-br" data-at="0.92" data-span="0.16">
+      <div class="kicker">03 — More</div>
+      <h2>Two ways<br />to see it</h2>
+      <div class="go">
+        <a class="primary" href="/night-street.html">Backstreet cut →</a>
+        <a href="/model.html">Spin in 3D</a>
+        <a href="/index.html">Drift reel</a>
+      </div>
+    </div>
+
+    <div class="cue">scroll to rotate<span class="arrow"></span></div>
+
+    <div id="loader">
+      <div class="rev">
+        <div class="rev-pct"><span id="pct">0</span><i>%</i></div>
+        <span class="rev-label">RENDERING <b>AFTER DARK</b></span>
+        <div class="rev-bar"><div id="revfill"></div></div>
+      </div>
+    </div>
+
+    <div class="scrub-track"></div>
+
+    <div class="credit">
+      Model: <a href="https://sketchfab.com/3d-models/2023-porsche-911-gt3-rs-992-bbb0f6181a52416bb776713cfd4987dd" target="_blank" rel="noopener">“2023 Porsche 911 GT3 RS (992)”</a> by supercarmodels — CC-BY-4.0 · HDRI: <a href="https://polyhaven.com/a/hansaplatz" target="_blank" rel="noopener">Hansaplatz</a> — Poly Haven CC0 · Cycles + AgX render by JRV
+    </div>
+
+    <script type="module" src="/src/scrub.js"></script>
+  </body>
+</html>

@@ -10,6 +10,8 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         model: resolve(__dirname, 'model.html'),
+        nightCity: resolve(__dirname, 'night-city.html'),
+        nightStreet: resolve(__dirname, 'night-street.html'),
       },
     },
   },
