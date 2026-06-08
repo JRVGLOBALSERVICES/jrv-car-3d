@@ -49,6 +49,13 @@ linear speed**, so the rims roll instead of sliding.
   (`metalness 0.72`, `roughness 0.34`, `envMapIntensity 2.1`) under a glossy clearcoat; the
   bright hazy sky reflects cleanly in the panels. (Single `CAR_PAINT` flip-point reverts to
   the candy-orange look.) Tyres forced matte black, rims machined graphite.
+- **Drift soundbed (`src/audio.js`):** a **Web Audio** layer maps the live state onto two
+  CC0 loops — an **engine** whose `playbackRate` (≈RPM) rides `speedFactor + throttle`, and a
+  **tyre screech** whose gain fades in only during the drift beat (louder on a throttle
+  stab). Gesture-unlocked (the first tap that fires the throttle also unlocks audio, per
+  browser autoplay policy), smoothed so RPM/gain never click. A mono **SOUND ON/OFF** pill
+  (animated EQ glyph) toggles it; the choice persists in `localStorage`. Frozen captures
+  (`?still`/`?detail`) and `prefers-reduced-motion` stay silent.
 - **Live energy:** headlights breathe (emissive + bloom), `HEADING nnn°` HUD reads the
   orbit angle.
 - **Reduced-motion:** skips the reveal + drift entirely — a static lit hero 3/4.
@@ -111,6 +118,8 @@ Consulted: `design-3d-stack.md` §"Anti-AI-slop checklist", §2 (web-3D defaults
 index.html                     chrome overlay (brand, HEADING HUD, headline, credit) +
                                render-reveal counter/bar + flash, tokens link
 src/tokens.css                 JRV brand tokens (hex source of truth + OKLCH chrome)
+src/audio.js                   Web Audio soundbed — engine-RPM + tyre-screech loops mapped
+                               to drift state, gesture-unlock, localStorage mute
 src/main.js                    the scene: renderer, clear-daytime HDRI IBL + hazy backdrop +
                                haze fog, midday sun lighting + sun lens-flare, GLB load (real
                                PBR) + wheel detection + measured radius, concrete lot texture,
@@ -118,6 +127,9 @@ src/main.js                    the scene: renderer, clear-daytime HDRI IBL + haz
                                drift yaw, white smoke pool, burn-mark decal pool, drag-orbit,
                                blob shadow, cinematic post chain (DOF + bloom +
                                speed-blur/grade/vignette/grain), HUD
+public/audio/
+  engine.mp3                   CC0 engine rev loop (Freesound #348856) — RPM bed
+  screech.mp3                  CC0 tyre squeal (Freesound #71739) — drift screech
 public/model/
   porsche-gt3rs.glb            optimized model (Draco + WebP)
   kloofendal_43d_clear_puresky_2k.hdr  Poly Haven clear-midday HDRI (CC0) — daylight IBL + backdrop
@@ -157,6 +169,13 @@ HDRI (current): **`kloofendal_43d_clear_puresky`** from
 no attribution required; credited as good practice). Used for clear-daytime image-based
 lighting and the hazy daylight backdrop. The previous **`belfast_sunset_puresky`** (also
 Poly Haven, CC0) is retained in the repo for the dusk look.
+
+## Audio credit
+
+Both loops are **CC0** (public domain, no attribution required; credited as good practice),
+sourced from [Freesound](https://freesound.org):
+- **Engine rev** — [#348856 "Hover vehicle rev loop"](https://freesound.org/s/348856/) — CC0
+- **Tyre squeal** — [#71739 "Chrysler LHS tire squeal 04"](https://freesound.org/s/71739/) — CC0
 
 ## References
 
