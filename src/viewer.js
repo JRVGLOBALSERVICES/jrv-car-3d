@@ -4,6 +4,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GroundedSkybox } from 'three/addons/objects/GroundedSkybox.js';
+import { gsap } from 'gsap';
 
 // Interactive GT3 RS — same car + studio HDRI as the Cycles hero, free-orbit,
 // and built to stay smooth on a phone. The home hero proves Three.js itself is
@@ -59,8 +60,11 @@ controls.dampingFactor = 0.06;
 controls.minDistance = 2.4;
 controls.maxDistance = 14;
 controls.maxPolarAngle = Math.PI * 0.49; // stay above the floor (never see under the car)
-controls.autoRotate = !reduceMotion;
 controls.autoRotateSpeed = 0.5;
+// The cinematic reel owns the idle camera, NOT auto-rotate. Auto-rotate only
+// survives as the reduced-motion fallback (no reel, gentle spin like before).
+controls.autoRotate = reduceMotion;
+controls.enabled = true;
 
 // the HDRI does ~all the lighting; a faint cool rim keeps the back edge alive.
 const rim = new THREE.DirectionalLight(0xbfd0ff, 0.3);
@@ -193,6 +197,17 @@ gltf.load(
     scene.add(root);
     frameObject(root);
 
+    // build the cinematic reel around the car's actual bounds
+    const fitted = new THREE.Box3().setFromObject(root);
+    const fc = fitted.getCenter(new THREE.Vector3());
+    const fs = fitted.getSize(new THREE.Vector3());
+    const fr = Math.max(fs.x, fs.z) || 1;
+    // seed the proxy at the interactive default frame so frame-0 of the reel is clean
+    cam.tx = controls.target.x; cam.ty = controls.target.y; cam.tz = controls.target.z;
+    cam.px = camera.position.x; cam.py = camera.position.y; cam.pz = camera.position.z;
+    cam.fov = camera.fov;
+    director = buildDirector(fc, fr);
+
     if (loaderEl) {
       loaderEl.classList.add('gone');
       setTimeout(() => loaderEl.remove(), 600);
@@ -213,13 +228,81 @@ addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// pause idle auto-rotate while dragging; resume a beat after release
-let resumeT = 0;
-controls.addEventListener('start', () => { controls.autoRotate = false; clearTimeout(resumeT); });
-controls.addEventListener('end', () => {
+// --- CINEMATIC DIRECTOR -----------------------------------------------------
+// An NFS-style attract reel: on load the camera hard-cuts between hero angles on
+// a GSAP master timeline. Touch/drag any time hands you the wheel (OrbitControls);
+// idle for IDLE_MS and the reel resumes. Reduced-motion skips the reel entirely.
+const IDLE_MS = 6000;
+let mode = reduceMotion ? 'control' : 'reel';   // 'reel' = director drives | 'control' = user drives
+let director = null;
+let idleT = 0;
+
+// camera proxy the timeline writes to; the tick reads it (+ handheld noise) onto
+// the real camera. Decoupling means OrbitControls and the director never fight
+// over camera.position in the same frame.
+const cam = { px: 4.2, py: 1.6, pz: 5.2, tx: 0, ty: 0.6, tz: 0, fov: 38 };
+
+// A shot = framing relative to the car's centre `c` and radius `r` (its longest
+// horizontal dimension). Offsets are multiples of r so the reel reframes to any
+// model. `dur`/`ease` shape the in-shot move; the cut between shots is a hard set.
+function buildShots(c, r) {
+  const at = (ox, oy, oz) => [c.x + ox * r, c.y + oy * r, c.z + oz * r];
+  const tgt = (oy = 0.0) => [c.x, c.y + oy * r, c.z];
+  return [
+    // 1 — front-3/4 low push-in (the reveal)
+    { from: at(0.55, 0.16, 1.95), to: at(0.42, 0.22, 1.30), look: tgt(0.02), lookTo: tgt(0.04), fov: 36, fovTo: 30, dur: 2.6, ease: 'power2.out' },
+    // 2 — wheel-level flank track
+    { from: at(-1.55, 0.10, 0.55), to: at(-1.55, 0.12, -0.65), look: tgt(0.05), fov: 42, fovTo: 42, dur: 2.4, ease: 'none' },
+    // 3 — fast top-down drop onto roof + wing
+    { from: at(0.15, 2.05, 0.70), to: at(0.08, 1.45, 0.38), look: tgt(0.0), fov: 46, fovTo: 40, dur: 1.7, ease: 'power3.inOut' },
+    // 4 — rear-3/4 chase push
+    { from: at(1.35, 0.50, -1.65), to: at(1.05, 0.46, -1.25), look: tgt(0.10), fov: 50, fovTo: 42, dur: 2.6, ease: 'power2.out' },
+    // 5 — side profile slow dolly
+    { from: at(1.95, 0.32, -0.25), to: at(1.95, 0.34, 0.45), look: tgt(0.06), fov: 32, fovTo: 32, dur: 2.2, ease: 'none' },
+    // 6 — crane-up to full hero 3/4 (settles toward the interactive default)
+    { from: at(1.25, 0.42, 1.35), to: at(1.45, 0.98, 1.60), look: tgt(0.10), lookTo: tgt(0.16), fov: 36, fovTo: 30, dur: 2.9, ease: 'power2.inOut' },
+  ];
+}
+
+function buildDirector(c, r) {
+  const shots = buildShots(c, r);
+  const tl = gsap.timeline({ repeat: -1, paused: mode !== 'reel' });
+  for (const s of shots) {
+    const L0 = s.look, L1 = s.lookTo || s.look;
+    // hard CUT: jump the proxy to the shot's start framing instantly...
+    tl.set(cam, {
+      px: s.from[0], py: s.from[1], pz: s.from[2],
+      tx: L0[0], ty: L0[1], tz: L0[2], fov: s.fov,
+    });
+    // ...then ride the in-shot move.
+    tl.to(cam, {
+      px: s.to[0], py: s.to[1], pz: s.to[2],
+      tx: L1[0], ty: L1[1], tz: L1[2], fov: s.fovTo,
+      duration: s.dur, ease: s.ease,
+    });
+  }
+  return tl;
+}
+
+// hand control to the user the instant they touch the scene
+function takeControl() {
+  if (reduceMotion || mode === 'control') { clearTimeout(idleT); return; }
+  mode = 'control';
+  if (director) director.pause();
+  controls.target.set(cam.tx, cam.ty, cam.tz); // seamless: orbit from where the reel left off
+  camera.position.set(cam.px, cam.py, cam.pz);
+  camera.fov = cam.fov; camera.updateProjectionMatrix();
+  controls.update();
+}
+// return to the reel after the user goes idle
+function scheduleResume() {
   if (reduceMotion) return;
-  resumeT = setTimeout(() => { controls.autoRotate = true; }, 2500);
-});
+  clearTimeout(idleT);
+  idleT = setTimeout(() => { mode = 'reel'; if (director) director.play(); }, IDLE_MS);
+}
+canvas.addEventListener('pointerdown', takeControl);
+controls.addEventListener('start', takeControl);
+controls.addEventListener('end', scheduleResume);
 
 // device-independent per-frame cost probe (honest measure on a GPU-less box)
 window.__info = () => ({
@@ -232,8 +315,20 @@ window.__info = () => ({
 // Renders every frame, just like the home hero confirmed smooth on a phone. No
 // interaction-gating: the car, the studio backdrop and the idle auto-spin are all
 // visible the instant the page loads — nothing waits for a tap.
+let t = 0;
 function tick() {
-  controls.update();        // damping + idle auto-rotate
+  t += 0.016;
+  if (mode === 'control') {
+    controls.update();      // user drives: damping + (reduced-motion) idle spin
+  } else {
+    // reel drives: read the GSAP proxy onto the camera, plus a faint handheld
+    // sway so no shot is ever dead-static (the thing that reads "gaming movie").
+    const nx = Math.sin(t * 0.7) * 0.012;
+    const ny = Math.cos(t * 0.9) * 0.010;
+    camera.position.set(cam.px + nx, cam.py + ny, cam.pz);
+    if (camera.fov !== cam.fov) { camera.fov = cam.fov; camera.updateProjectionMatrix(); }
+    camera.lookAt(cam.tx, cam.ty, cam.tz);
+  }
   renderer.render(scene, camera);
   requestAnimationFrame(tick);
 }
