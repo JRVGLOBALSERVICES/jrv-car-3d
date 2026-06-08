@@ -3,7 +3,6 @@ import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { GroundedSkybox } from 'three/addons/objects/GroundedSkybox.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -51,7 +50,8 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: !isMobile, alpha: 
 renderer.setPixelRatio(DPR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.NeutralToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 1.0;   // was 1.15 — eased so bright studio/city
+                                       // reflections on the paint don't blow out
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
@@ -142,6 +142,26 @@ road.position.y = 0.0;
 road.renderOrder = -1;
 road.visible = false;
 scene.add(road);
+
+// ---------------------------------------------------------------------------
+// STUDIO FLOOR (the REVEAL act ground): a dark, lightly-polished seamless sweep
+// — replaces showing the literal brown_photostudio HDRI as a GroundedSkybox
+// (which read as a random stock photo behind the car). The HDRI now lights +
+// reflects ONLY; the visible backdrop is a clean graphite cyclorama (dome) over
+// this matte-sheen floor. Reflects the dome gradient softly via the env map.
+// ---------------------------------------------------------------------------
+const studioFloor = new THREE.Mesh(
+  new THREE.PlaneGeometry(80, 80),
+  new THREE.MeshStandardMaterial({
+    color: 0x0a0b0e, roughness: 0.28, metalness: 0.0, envMapIntensity: 0.5,
+    transparent: true, opacity: 0,
+  })
+);
+studioFloor.rotateX(-Math.PI / 2);
+studioFloor.position.y = 0.0;
+studioFloor.renderOrder = -1;
+studioFloor.visible = false;
+scene.add(studioFloor);
 
 // gradient backdrop (dome) for the SPEED/HERO acts — replaces the studio skybox.
 function skyDomeTexture(top, bottom) {
@@ -260,12 +280,11 @@ function scrollCity(dt) {
 const cityFog = new THREE.Fog(0x070b16, 55, 330);  // applied only during PURSUIT
 
 // ---------------------------------------------------------------------------
-// IBL: studio HDRI (REVEAL) as a GroundedSkybox + sunset HDRI (SPEED/HERO) env.
+// IBL: three real Poly Haven HDRIs as REFLECTION/LIGHTING environments only
+// (studio REVEAL · night-city PURSUIT · sunset HERO). None is shown as a
+// skybox — the visible backdrop is always the graded dome + a ground plane.
 // ---------------------------------------------------------------------------
 const ENV_YAW = 2.2;
-const SKY_HEIGHT = 6;
-const SKY_RADIUS = 90;
-let studioSky = null;
 let studioEnv = null;
 let sunsetEnv = null;
 let nightEnv = null;
@@ -274,17 +293,14 @@ const rgbe = new RGBELoader();
 rgbe.load(`${BASE}model/brown_photostudio_02_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
   studioEnv = hdr;
+  // environment (reflections + lighting) ONLY — NOT shown as a skybox. The
+  // literal photo-studio projected as a GroundedSkybox read as a stock photo
+  // behind the car; the REVEAL backdrop is now a clean graphite cyclorama
+  // (dome) over the studioFloor, with this HDRI doing the reflections.
   scene.environment = hdr;
   scene.environmentRotation = new THREE.Euler(0, ENV_YAW, 0);
-  studioSky = new GroundedSkybox(hdr, SKY_HEIGHT, SKY_RADIUS);
-  studioSky.position.y = SKY_HEIGHT;
-  studioSky.rotation.y = ENV_YAW;
-  studioSky.renderOrder = 0;
-  studioSky.material.transparent = true;   // so we can crossfade it out for the drive
-  scene.add(studioSky);
   scene.background = null;
-  // if the reel already left the studio before this finished loading, keep it hidden
-  if (currentAct && currentAct !== 'reveal') { studioSky.visible = false; studioSky.material.opacity = 0; }
+  if (currentAct === 'reveal') setAct('reveal');   // refresh now that env is in
 });
 rgbe.load(`${BASE}model/belfast_sunset_puresky_2k.hdr`, (hdr) => {
   hdr.mapping = THREE.EquirectangularReflectionMapping;
@@ -329,18 +345,25 @@ function tuneMaterials(root) {
     for (const m of mats) {
       const name = (m.name || '').toLowerCase();
       if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
-        m.clearcoat = 1.0; m.clearcoatRoughness = 0.03;
-        m.roughness = Math.min(m.roughness ?? 0.4, 0.12);
-        m.envMapIntensity = 1.5;
-        // iridescent thin-film paint (kept — Rj's call): hue shifts with angle.
-        m.iridescence = 1.0;
-        m.iridescenceIOR = 1.3;
-        m.iridescenceThicknessRange = [130, 720];
-        if (m.color) m.color.lerp(new THREE.Color(0x0b0d12), 0.55);
-        m.metalness = Math.max(m.metalness ?? 0, 0.6);
+        // Real automotive 2-coat paint: a deep coloured base under a clearcoat.
+        // Was a near-black MIRROR with full iridescence — it caught every studio
+        // softbox and read as "too shiny / glossy due to lights" (Rj's note).
+        // Higher base roughness = the reflections soften into a sheen instead of
+        // hard hot specs; clearcoat stays glossy so it still reads as car paint.
+        m.clearcoat = 1.0; m.clearcoatRoughness = 0.09;
+        m.roughness = Math.max(Math.min(m.roughness ?? 0.4, 0.34), 0.26);
+        m.envMapIntensity = 0.95;
+        // iridescence dropped (was 1.0) — the rainbow thin-film was the loudest
+        // part of the over-glossy look. A whisper of it keeps a subtle flake.
+        m.iridescence = 0.12;
+        m.iridescenceIOR = 1.25;
+        m.iridescenceThicknessRange = [200, 560];
+        // a deep graphite blue, not a black mirror (lerp eased 0.55 → 0.32)
+        if (m.color) m.color.lerp(new THREE.Color(0x10131a), 0.32);
+        m.metalness = Math.max(m.metalness ?? 0, 0.45);
       } else if (/chrome|mirror|metal/.test(name)) {
-        m.metalness = 1.0; m.roughness = Math.min(m.roughness ?? 0.1, 0.12);
-        m.envMapIntensity = 1.4;
+        m.metalness = 1.0; m.roughness = Math.max(Math.min(m.roughness ?? 0.1, 0.22), 0.14);
+        m.envMapIntensity = 1.05;
         if ('transmission' in m) { m.transmission = 0; m.transparent = false; }
       } else if (/glass|window|windscreen|windshield/.test(name)) {
         if ('transmission' in m) m.transmission = 0;
@@ -408,10 +431,10 @@ if (!isMobile) {
 
 const bloom = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  isMobile ? 0.32 : 0.42,   // strength — restrained, so it's a glow not a wash
+  isMobile ? 0.26 : 0.32,   // strength — eased so reflected lights glow, not wash
   0.5,                      // radius
-  0.92                      // threshold — ONLY genuine highlights (lights/sun) bloom,
-);                          // not the bright metallic paint reflecting the studio
+  0.95                      // threshold raised 0.92 → 0.95: ONLY real emitters
+);                          // (head/tail lights, neon) bloom — not paint highlights
 composer.addPass(bloom);
 
 let afterimage = null;
@@ -512,10 +535,15 @@ function setAct(name) {
 
   if (name === 'reveal') {
     if (studioEnv) scene.environment = studioEnv;
+    // clean graphite studio cyclorama + matte-sheen floor (NOT the literal HDRI)
+    dome.material.map = skyDomeTexture('#23252b', '#0b0c10');
+    dome.material.map.needsUpdate = true;
+    dome.visible = true;
+    gsap.to(dome.material, { opacity: 1, duration: 1.0 });
+    studioFloor.visible = true;
+    gsap.to(studioFloor.material, { opacity: 1, duration: 1.0 });
     road.visible = true;
     gsap.to(road.material, { opacity: 0, duration: 0.8, onComplete: () => { road.visible = false; } });
-    gsap.to(dome.material, { opacity: 0, duration: 0.8, onComplete: () => { dome.visible = false; } });
-    if (studioSky) { studioSky.visible = true; gsap.to(studioSky.material, { opacity: 1, duration: 1.0 }); }
     scene.fog = null;
     gsap.to(cityMat, { opacity: 0, duration: 0.6 });
     gsap.to(lampMat, { opacity: 0, duration: 0.6, onComplete: () => { cityGroup.visible = false; } });
@@ -526,7 +554,8 @@ function setAct(name) {
     // + dome in, and reflect the act's OWN HDRI off the car.
     const env = name === 'hero' ? sunsetEnv : nightEnv;
     if (env) scene.environment = env;
-    if (studioSky) gsap.to(studioSky.material, { opacity: 0, duration: 0.9, onComplete: () => { studioSky.visible = false; } });
+    // fade the studio floor out — the drive acts ride the scrolling road instead
+    gsap.to(studioFloor.material, { opacity: 0, duration: 0.8, onComplete: () => { studioFloor.visible = false; } });
     if (scene.background) scene.background = null;
     dome.visible = true;
     road.visible = true;
