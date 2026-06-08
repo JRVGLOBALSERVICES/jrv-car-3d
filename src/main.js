@@ -10,6 +10,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { Reflector } from 'three/addons/objects/Reflector.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
+import { createAudio } from './audio.js';
 
 // --- JRV brand palette ---
 const JRV = {
@@ -25,6 +26,9 @@ const canvas = document.getElementById('scene');
 const headingEl = document.getElementById('heading');
 const loader = document.getElementById('loader');
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// drift soundbed (engine RPM + tyre screech) — gesture-unlocked, muted-by-default-safe
+const audio = createAudio({ reduceMotion });
 
 // capture overrides for deterministic screenshots:
 //   ?detail=1           hold the tight front-rim study (car still)
@@ -775,6 +779,7 @@ function fireThrottle(clientX) {
 
 if (!frozen) {
   canvas.addEventListener('pointerdown', (e) => {
+    audio.unlock();                       // first gesture lights up the soundbed
     pressing = true; dragging = false;
     downX = dragX = e.clientX; downY = dragY = e.clientY;
     canvas.setPointerCapture(e.pointerId);
@@ -805,6 +810,20 @@ if (!frozen) {
   };
   canvas.addEventListener('pointerup', endPress);
   canvas.addEventListener('pointercancel', endPress);
+}
+
+// ===== sound toggle (chrome button) =====
+const soundBtn = document.getElementById('sound');
+if (soundBtn && !frozen && !reduceMotion) {
+  const paint = () => {
+    soundBtn.classList.toggle('muted', audio.muted);
+    soundBtn.setAttribute('aria-label', audio.muted ? 'Unmute engine sound' : 'Mute engine sound');
+    soundBtn.querySelector('.lbl').textContent = audio.muted ? 'SOUND OFF' : 'SOUND ON';
+  };
+  paint();
+  soundBtn.addEventListener('click', () => { audio.unlock(); audio.toggleMuted(); paint(); });
+} else if (soundBtn) {
+  soundBtn.style.display = 'none';   // frozen captures + reduced-motion: no audio control
 }
 
 // ===== loop =====
@@ -1009,6 +1028,14 @@ function animate() {
   // during the tight rim study the subject is much closer — pull focus in so the wheel
   // is sharp and the body behind it falls off.
   if (phase === 'detail') bokeh.uniforms['focus'].value = camera.position.distanceTo(frontWheelWorld);
+
+  // ---- feed the soundbed: engine RPM rides speed + throttle, screech rides the slide ----
+  audio.update({
+    active: revealed && !reduceMotion,
+    drifting: phase === 'drift',
+    speed: speedFactor,
+    throttle,
+  }, dt);
 
   // ---- feed the cinematic grade: speed drives the radial smear + chromatic aberration ----
   cinematic.uniforms.uTime.value = t;
