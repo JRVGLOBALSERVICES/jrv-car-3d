@@ -19,7 +19,17 @@ const CREDIT = (
   </>
 );
 
+const VIEWS = [
+  { href: '/', key: 'home', label: 'Reel' },
+  { href: '/night-city', key: 'city', label: 'After Dark' },
+  { href: '/night-street', key: 'street', label: 'Backstreet' },
+  { href: '/iridescent', key: 'iridescent', label: 'Oil-Slick' },
+  { href: '/build', key: 'build', label: 'The Build' },
+];
+
 export default function Chrome({ mood, current, hint, cue }) {
+  const active = VIEWS.find((v) => v.key === current) ?? VIEWS[0];
+
   return (
     <div className="chrome">
       <div className="brand">
@@ -29,23 +39,25 @@ export default function Chrome({ mood, current, hint, cue }) {
         <span className="sub">{mood.label}</span>
       </div>
 
-      <nav className="nav" aria-label="Showroom views">
-        <Link href="/" aria-current={current === 'home' ? 'page' : undefined}>
-          Reel
-        </Link>
-        <Link href="/night-city" aria-current={current === 'city' ? 'page' : undefined}>
-          After Dark
-        </Link>
-        <Link href="/night-street" aria-current={current === 'street' ? 'page' : undefined}>
-          Backstreet
-        </Link>
-        <Link href="/iridescent" aria-current={current === 'iridescent' ? 'page' : undefined}>
-          Oil-Slick
-        </Link>
-        <Link href="/build" aria-current={current === 'build' ? 'page' : undefined}>
-          The Build
-        </Link>
-      </nav>
+      {/* Dropdown menu-bar. Native <details> = works SSR / no-JS, keyboard
+          accessible, and keeps every link in the DOM for SEO + no-WebGL crawl. */}
+      <details className="navmenu">
+        <summary aria-label="Showroom views">
+          <span className="navmenu-current">{active.label}</span>
+          <span className="navmenu-chev" aria-hidden="true" />
+        </summary>
+        <nav className="navmenu-list" aria-label="Showroom views">
+          {VIEWS.map((v) => (
+            <Link
+              key={v.key}
+              href={v.href}
+              aria-current={current === v.key ? 'page' : undefined}
+            >
+              {v.label}
+            </Link>
+          ))}
+        </nav>
+      </details>
 
       <div className="hero">
         <div className="tag">911 GT3 RS · live WebGL · {mood.label}</div>

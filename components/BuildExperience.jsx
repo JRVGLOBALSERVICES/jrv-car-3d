@@ -214,9 +214,9 @@ export default function BuildExperience({ mood }) {
           </group>
 
           {/* 3-point reveal rig (only lights the render materials) */}
-          <rectAreaLight color="#dfe6ff" intensity={16} width={7} height={5} position={[-7, 6, 5.5]} />
-          <rectAreaLight color="#cdd8ff" intensity={9} width={9} height={5} position={[3, 2.2, -8]} />
-          <rectAreaLight color="#ffffff" intensity={8} width={6} height={6} position={[0, 7, 0.5]} />
+          <rectAreaLight color="#dfe6ff" intensity={11} width={7} height={5} position={[-7, 6, 5.5]} />
+          <rectAreaLight color="#cdd8ff" intensity={6} width={9} height={5} position={[3, 2.2, -8]} />
+          <rectAreaLight color="#ffffff" intensity={5.5} width={6} height={6} position={[0, 7, 0.5]} />
           <ambientLight intensity={0.12} />
 
           <BuildCar phase={phase} paintBase={mood.paintBase} />
@@ -231,7 +231,7 @@ export default function BuildExperience({ mood }) {
         </ScrollControls>
 
         <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-          <Bloom mipmapBlur intensity={building ? 0.5 : 0.95} luminanceThreshold={0.62} luminanceSmoothing={0.25} radius={0.8} />
+          <Bloom mipmapBlur intensity={building ? 0.35 : 0.5} luminanceThreshold={0.82} luminanceSmoothing={0.22} radius={0.6} />
           <ToneMapping mode={ToneMappingMode.AGX} />
         </EffectComposer>
         <AdaptiveDpr pixelated />
