@@ -7,9 +7,15 @@ import * as THREE from 'three';
 
 const WORLD_X = new THREE.Vector3(1, 0, 0); // car points along Z → axle is world X
 
-// Wheel node patterns (verified from the GLB node graph): each corner carries a
-// rim + tyre + brake-disc group. Spinning these about world-X rolls the wheels.
-const WHEEL_RE = /chrome_wheels_20x9|Object_4\.\d|brakedisc_FR/i;
+// Per-part wheel node patterns (verified from the GLB node graph). Each corner
+// has THREE separate sibling nodes — rim, tyre, brake — and crucially their node
+// origins do NOT coincide (the brake-disc origin sits ~15u off the hub). Spinning
+// each node about its own origin makes the brake sweep away from the tyre and the
+// parts never move as one wheel. So we instead CLUSTER each corner's three parts
+// into a Group pivoted at the true hub centre and spin the group rigidly.
+const RIM_RE = /chrome_wheels_20x9/i;
+const TYRE_RE = /Object_4\.\d/i;
+const BRAKE_RE = /brakedisc_FR/i;
 
 export default function Car({ mood, spinRef }) {
   const root = useRef();
@@ -20,11 +26,15 @@ export default function Car({ mood, spinRef }) {
   const car = useMemo(() => scene.clone(true), [scene]);
 
   useEffect(() => {
-    const found = [];
+    const rims = [], tyres = [], brakes = [];
     const paintBase = new THREE.Color(mood.paintBase);
 
     car.traverse((n) => {
-      if (n.name && WHEEL_RE.test(n.name)) found.push(n);
+      if (n.name) {
+        if (RIM_RE.test(n.name)) rims.push(n);
+        else if (TYRE_RE.test(n.name)) tyres.push(n);
+        else if (BRAKE_RE.test(n.name)) brakes.push(n);
+      }
       if (!n.isMesh || !n.material) return;
       n.castShadow = true;
       n.receiveShadow = false;
@@ -74,21 +84,62 @@ export default function Car({ mood, spinRef }) {
       }
     });
 
-    // Keep only the OUTERMOST matched node per wheel group — otherwise a matched
-    // child inherits its parent's spin AND gets its own, doubling its rate.
-    const set = new Set(found);
-    const outermost = found.filter((n) => {
-      let p = n.parent;
-      while (p) {
-        if (set.has(p)) return false;
-        p = p.parent;
+    // Outermost-only per part type, so a matched child doesn't get clustered twice.
+    const onlyOutermost = (list) => {
+      const set = new Set(list);
+      return list.filter((n) => {
+        let p = n.parent;
+        while (p) { if (set.has(p)) return false; p = p.parent; }
+        return true;
+      });
+    };
+    const rimRoots = onlyOutermost(rims);
+    const tyreRoots = onlyOutermost(tyres);
+    const brakeRoots = onlyOutermost(brakes);
+
+    // Cluster the parts into 4 corners by the sign of their world position
+    // (x = left/right, z = front/rear). Each corner = 1 rim + 1 tyre + 1 brake.
+    car.updateWorldMatrix(true, true);
+    const cornerKey = (n) => {
+      const p = n.getWorldPosition(new THREE.Vector3());
+      return `${p.x >= 0 ? 'R' : 'L'}${p.z >= 0 ? 'F' : 'B'}`;
+    };
+    const corners = {}; // key -> { rim, tyre, brake }
+    const bucket = (list, slot) => {
+      for (const n of list) {
+        const k = cornerKey(n);
+        (corners[k] ||= {})[slot] = n;
       }
-      return true;
-    });
-    wheels.current = outermost;
+    };
+    bucket(rimRoots, 'rim');
+    bucket(tyreRoots, 'tyre');
+    bucket(brakeRoots, 'brake');
+
+    // For each corner: build a pivot Group at the TRUE hub centre (the tyre's
+    // bounding-box centre — a clean torus around the axle), then re-parent the
+    // rim + tyre + brake into it preserving world transforms. Spinning the group
+    // now rolls all three parts rigidly about the real hub axis.
+    const pivots = [];
+    for (const k of Object.keys(corners)) {
+      const { rim, tyre, brake } = corners[k];
+      const parts = [rim, tyre, brake].filter(Boolean);
+      if (!parts.length) continue;
+      const hubSrc = tyre || rim || parts[0];
+      const hubWorld = new THREE.Box3().setFromObject(hubSrc).getCenter(new THREE.Vector3());
+
+      const pivot = new THREE.Group();
+      pivot.name = `WHEEL_PIVOT_${k}`;
+      car.add(pivot);
+      car.updateWorldMatrix(true, true);
+      pivot.position.copy(car.worldToLocal(hubWorld.clone()));
+      pivot.updateWorldMatrix(true, true);
+      for (const part of parts) pivot.attach(part); // preserves world transform
+      pivots.push(pivot);
+    }
+    wheels.current = pivots;
     if (typeof window !== 'undefined') {
-      window.__wheelCount = outermost.length;
-      window.__wheelQ = () => (outermost[0] ? outermost[0].quaternion.toArray().map((n) => +n.toFixed(4)) : null);
+      window.__wheelCount = pivots.length;
+      window.__wheelQ = () => (pivots[0] ? pivots[0].quaternion.toArray().map((n) => +n.toFixed(4)) : null);
     }
 
     // Normalize: center on origin, drop onto the floor (y=0), scale to ~4 units long.
