@@ -7,6 +7,60 @@ import * as THREE from 'three';
 
 const WORLD_X = new THREE.Vector3(1, 0, 0); // car points along Z → axle is world X
 
+// Bold thin-film / oil-slick paint (reel DZUxxxXpBrH). MeshPhysicalMaterial's
+// built-in `iridescence` is too subtle for this look (see memory), so we inject
+// the reel's actual node graph by hand: Layer-Weight *Facing* → wavelength ramp.
+// Facing the camera reads warm (red/orange), grazing edges go cool (blue/violet),
+// with a fine flake sparkle. The spectral colour both tints the lit surface and
+// adds a fresnel-weighted emissive so Bloom lights the grazing edges.
+function applyIridescentPaint(m) {
+  m.clearcoat = 0.7;
+  m.clearcoatRoughness = 0.1;
+  m.roughness = 0.22; // reel's Glossy roughness
+  m.metalness = 0.5;
+  m.envMapIntensity = 0.6; // keep the HDRI from blowing out the spectral read
+  m.color = new THREE.Color('#141416'); // near-black charcoal substrate
+  if ('iridescence' in m) {
+    m.iridescence = 0.6;
+    m.iridescenceIOR = 1.3;
+    m.iridescenceThicknessRange = [120, 560];
+  }
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        'void main() {',
+        /* glsl */ `
+        vec3 jrvHue(float h){
+          h = fract(h);
+          return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0);
+        }
+        float jrvHash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+        void main() {`
+      )
+      .replace(
+        '#include <emissivemap_fragment>',
+        /* glsl */ `#include <emissivemap_fragment>
+        {
+          vec3 vd = normalize(vViewPosition);
+          vec3 nn = normalize(normal);
+          float ndv = clamp(dot(nn, vd), 0.0, 1.0);
+          float fres = pow(1.0 - ndv, 1.55);
+          // fine flake sparkle (screen-space hash → metallic shimmer)
+          float fl = jrvHash(floor(gl_FragCoord.xy * 0.5));
+          // facing → warm (orange/red), grazing → cool (blue/violet). Wider span
+          // so a 3/4 view shows the whole spectrum walk across the panels.
+          float h = (1.0 - ndv) * 0.92 + 0.04 + (fl - 0.5) * 0.05;
+          vec3 iri = jrvHue(h);
+          // tint the lit surface with the spectral colour (dominant over the base)
+          diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.12 + iri * 0.9, 0.94);
+          // fresnel-weighted glow on the grazing edges (Bloom catches this)
+          totalEmissiveRadiance += iri * (fres * 1.7 + 0.16) * (0.6 + 0.7 * fl);
+        }`
+      );
+  };
+  m.needsUpdate = true;
+}
+
 // Per-part wheel node patterns (verified from the GLB node graph). Each corner
 // has THREE separate sibling nodes — rim, tyre, brake — and crucially their node
 // origins do NOT coincide (the brake-disc origin sits ~15u off the hub). Spinning
@@ -41,7 +95,9 @@ export default function Car({ mood, spinRef }) {
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       for (const m of mats) {
         const name = (m.name || '').toLowerCase();
-        if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
+        if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name) && mood.paint === 'iridescent') {
+          applyIridescentPaint(m);
+        } else if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
           m.clearcoat = 1.0;
           m.clearcoatRoughness = 0.06;
           m.roughness = Math.min(m.roughness ?? 0.3, 0.3);

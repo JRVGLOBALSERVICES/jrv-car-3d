@@ -12,6 +12,12 @@ const Experience = dynamic(() => import('./Experience'), {
   loading: () => null,
 });
 
+// The "making-of" scene (reel 1) is a separate Canvas — loaded only on /build.
+const BuildExperience = dynamic(() => import('./BuildExperience'), {
+  ssr: false,
+  loading: () => null,
+});
+
 // If the WebGL tree throws at any point (context creation, GLB decode, a driver
 // quirk on a low-end phone GPU), React would unmount the whole tree -> white
 // screen. This boundary catches that and paints the branded fallback instead.
@@ -46,7 +52,7 @@ function hasWebGL() {
   }
 }
 
-export default function SceneMount({ mood, mode }) {
+export default function SceneMount({ mood, mode, variant = 'reel' }) {
   // 'probe' until we know; avoids an SSR/client flash.
   const [gl, setGl] = useState('probe');
   useEffect(() => {
@@ -60,7 +66,11 @@ export default function SceneMount({ mood, mode }) {
           <SceneFallback mood={mood} />
         ) : gl === 'ok' ? (
           <GLBoundary mood={mood}>
-            <Experience mood={mood} mode={mode} />
+            {variant === 'build' ? (
+              <BuildExperience mood={mood} />
+            ) : (
+              <Experience mood={mood} mode={mode} />
+            )}
           </GLBoundary>
         ) : null}
       </div>

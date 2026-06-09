@@ -39,6 +39,12 @@ export default function Chrome({ mood, current, hint, cue }) {
         <Link href="/night-street" aria-current={current === 'street' ? 'page' : undefined}>
           Backstreet
         </Link>
+        <Link href="/iridescent" aria-current={current === 'iridescent' ? 'page' : undefined}>
+          Oil-Slick
+        </Link>
+        <Link href="/build" aria-current={current === 'build' ? 'page' : undefined}>
+          The Build
+        </Link>
       </nav>
 
       <div className="hero">

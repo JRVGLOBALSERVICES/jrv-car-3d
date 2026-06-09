@@ -15,7 +15,7 @@ import { ColorGrade } from './Grade';
 function Effects({ mood, isMobile }) {
   return (
     <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-      <Bloom mipmapBlur intensity={1.05} luminanceThreshold={0.62} luminanceSmoothing={0.25} radius={0.85} />
+      <Bloom mipmapBlur intensity={mood.bloom ?? 1.05} luminanceThreshold={0.62} luminanceSmoothing={0.25} radius={0.85} />
       <ColorGrade
         saturation={mood.grade.saturation}
         vignette={mood.grade.vignette}
