@@ -42,7 +42,7 @@ function Rect({ color, intensity, width, height, position, target = [0, 0.5, 0] 
   return <rectAreaLight ref={ref} color={color} intensity={intensity} width={width} height={height} position={position} />;
 }
 
-export default function SceneRig({ mood, isMobile = false }) {
+export default function SceneRig({ mood, isMobile = false, spinRef }) {
   useEffect(() => {
     RectAreaLightUniformsLib.init();
   }, []);
@@ -118,7 +118,7 @@ export default function SceneRig({ mood, isMobile = false }) {
 
       {/* Animated accent laser-grid (the reel signature) — reflected by the mirror floor.
           Suppressed for the iridescent void (mood.noGrid). */}
-      {!mood.noGrid && <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} />}
+      {!mood.noGrid && <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} speedRef={spinRef} />}
 
       {/* Soft contact shadow grounding the car on the reflection */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0.2]} scale={[3.4, 4.6, 1]}>

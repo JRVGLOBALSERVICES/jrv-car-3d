@@ -9,6 +9,7 @@ import * as THREE from 'three';
 
 import Car from './Car';
 import SceneRig from './SceneRig';
+import WindStreaks from './WindStreaks';
 import CameraDirector, { SHOTS } from './CameraDirector';
 import { ColorGrade } from './Grade';
 
@@ -56,8 +57,9 @@ export default function Experience({ mood, mode = 'scroll' }) {
       <Suspense fallback={null}>
         {mode === 'scroll' ? (
           <ScrollControls pages={SHOTS.length} damping={0.3}>
-            <SceneRig mood={mood} isMobile={isMobile} />
+            <SceneRig mood={mood} isMobile={isMobile} spinRef={spinRef} />
             <Car mood={mood} spinRef={spinRef} />
+            <WindStreaks spinRef={spinRef} mood={mood} reduceMotion={reduceMotion} isMobile={isMobile} />
             <CameraDirector spinRef={spinRef} reduceMotion={reduceMotion} />
             <Scroll html style={{ width: '100%' }}>
               <SectionLabels mood={mood} />
@@ -65,8 +67,9 @@ export default function Experience({ mood, mode = 'scroll' }) {
           </ScrollControls>
         ) : (
           <>
-            <SceneRig mood={mood} isMobile={isMobile} />
+            <SceneRig mood={mood} isMobile={isMobile} spinRef={spinRef} />
             <Car mood={mood} spinRef={spinRef} />
+            <WindStreaks spinRef={spinRef} mood={mood} reduceMotion={reduceMotion} isMobile={isMobile} />
             <OrbitControls
               enableDamping
               dampingFactor={0.06}

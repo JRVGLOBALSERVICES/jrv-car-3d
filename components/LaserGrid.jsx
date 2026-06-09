@@ -23,6 +23,8 @@ const frag = /* glsl */ `
   uniform float uTime;
   uniform vec3 uColor;
   uniform float uIntensity;
+  uniform float uScroll; // accumulated travel — streams the grid backward
+  uniform float uSpeed;  // normalised 0..1 speed for the rush emphasis
 
   float gridLine(vec2 uv, float cells) {
     vec2 g = abs(fract(uv * cells - 0.5) - 0.5) / fwidth(uv * cells);
@@ -31,8 +33,12 @@ const frag = /* glsl */ `
 
   void main() {
     vec2 uv = vUv;
-    float fine  = gridLine(uv, 30.0) * 0.42;
-    float major = gridLine(uv, 7.5) * 1.25;
+    // Stream the grid sample along the travel axis so the ground rushes under
+    // the car — the glow/fade stays centred (uses the un-scrolled uv), so only
+    // the lines move. This is the ground-speed cue that kills the "parked" read.
+    vec2 guv = uv + vec2(0.0, uScroll);
+    float fine  = gridLine(guv, 30.0) * 0.42;
+    float major = gridLine(guv, 7.5) * 1.25;
     float grid  = max(fine, major);
 
     float d = distance(uv, vec2(0.5));
@@ -43,19 +49,24 @@ const frag = /* glsl */ `
     float ring  = abs(d - phase * 0.52);
     float sweep = smoothstep(0.018, 0.0, ring) * 1.4 * (1.0 - phase);
 
-    float a = (grid + sweep) * fade * uIntensity;
-    vec3 col = uColor * (1.0 + sweep * 2.2);
+    // at speed, the major lines smear into motion bands along the travel axis
+    float band = gridLine(vec2(0.0, guv.y), 7.5) * uSpeed * 0.7;
+
+    float a = (grid + sweep + band) * fade * uIntensity;
+    vec3 col = uColor * (1.0 + sweep * 2.2 + uSpeed * 0.6);
     gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
   }
 `;
 
-export default function LaserGrid({ color = '#00FF88', intensity = 1.0, size = 46 }) {
+export default function LaserGrid({ color = '#00FF88', intensity = 1.0, size = 46, speedRef }) {
   const matRef = useRef();
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
       uColor: { value: new THREE.Color(color) },
       uIntensity: { value: intensity },
+      uScroll: { value: 0 },
+      uSpeed: { value: 0 },
     }),
     [] // eslint-disable-line react-hooks/exhaustive-deps
   );
@@ -64,8 +75,24 @@ export default function LaserGrid({ color = '#00FF88', intensity = 1.0, size = 4
   uniforms.uColor.value.set(color);
   uniforms.uIntensity.value = intensity;
 
+  const reduceMotion = useMemo(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    []
+  );
+
   useFrame((_, delta) => {
-    uniforms.uTime.value += Math.min(delta, 0.05);
+    if (reduceMotion) {
+      uniforms.uSpeed.value = 0; // static glowing grid — no ground-rush / sweep travel
+      return;
+    }
+    const d = Math.min(delta, 0.05);
+    uniforms.uTime.value += d;
+    // derive ground speed from the shared wheel-spin signal (idle 0.5 → fast ~5.5)
+    const raw = speedRef?.current ?? 1;
+    const s = THREE.MathUtils.clamp((raw - 0.5) / 4.5, 0, 1);
+    uniforms.uSpeed.value = s;
+    // accumulate travel; a faint floor keeps the orbit pages quietly alive
+    uniforms.uScroll.value += (0.04 + s * 0.85) * d;
   });
 
   return (
