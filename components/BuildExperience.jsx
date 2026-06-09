@@ -10,6 +10,7 @@ import {
   Html,
   Environment,
   MeshReflectorMaterial,
+  ContactShadows,
   AdaptiveDpr,
   Preload,
 } from '@react-three/drei';
@@ -22,7 +23,8 @@ import BuildCar from './BuildCar';
 
 const VIEWPORT_BG = new THREE.Color('#2a2a2a'); // 3D-software viewport grey
 const STUDIO_BG = new THREE.Color('#0c0d10'); // dark studio for the reveal
-const PAGES = 4; // scroll length
+const PAGES = 5; // scroll length — block-out · chrome · coat · 360 · drive
+const CUT = 0.44; // viewport → studio handoff (panels done, coat begins)
 
 // Real 911 GT3 RS (992) dimensions — the HUD reads like a modelling viewport.
 const DIMS = [
@@ -81,7 +83,7 @@ function Director({ phase, setBuilding, reduceMotion }) {
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
     const offset = reduceMotion ? 1 : scroll.offset;
-    const building = reduceMotion ? false : offset < 0.32;
+    const building = reduceMotion ? false : offset < CUT;
 
     phase.current.building = building;
     phase.current.reveal = offset;
@@ -90,16 +92,18 @@ function Director({ phase, setBuilding, reduceMotion }) {
       setBuilding(building);
     }
 
-    // reveal eases the camera from a wide modelling view to a tight hero shot,
-    // then SETTLES on a front-3/4 hero angle for the "alive" finish (never drops
-    // to floor-level where it framed the blown-out horizon).
-    const r = smooth01((offset - 0.32) / 0.68);
-    const alive = smooth01((offset - 0.9) / 0.1);
-    const sweepAz = -0.55 + offset * Math.PI * 1.15;
+    // The camera eases from a wide modelling view to the hero distance across the
+    // build + coat, settling on a front-left 3/4 by ~0.72 — then the FINISHED car
+    // does a full 360 turntable in the tail and lands back on that hero angle.
+    const r = smooth01(offset / 0.72);
+    const turn = smooth01((offset - 0.72) / 0.28); // one full revolution
     const heroAz = -0.62; // front-left 3/4 hero
-    const az = THREE.MathUtils.lerp(sweepAz, heroAz, alive) + (reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.04);
+    const buildAz = THREE.MathUtils.lerp(-0.55, heroAz, r); // continuous into the turn
+    const az =
+      (offset < 0.72 ? buildAz : heroAz + turn * Math.PI * 2) +
+      (reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.03);
     const radius = THREE.MathUtils.lerp(6.4, 5.0, r);
-    const height = THREE.MathUtils.lerp(2.5, 1.75, r);
+    const height = THREE.MathUtils.lerp(2.6, 1.7, r);
 
     const want = new THREE.Vector3(Math.cos(az) * radius, height, Math.sin(az) * radius);
     const s = 1 - Math.pow(0.0016, d);
@@ -110,16 +114,16 @@ function Director({ phase, setBuilding, reduceMotion }) {
   return null;
 }
 
-function Studio({ visible }) {
+function Studio({ visible, isMobile }) {
   RectAreaLightUniformsLib.init();
   const backdrop = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = 16; c.height = 512;
     const ctx = c.getContext('2d');
     const g = ctx.createLinearGradient(0, 0, 0, 512);
-    g.addColorStop(0, '#262a31');
-    g.addColorStop(0.6, '#0c0d10');
-    g.addColorStop(1, '#08090b');
+    g.addColorStop(0, '#22262d');
+    g.addColorStop(0.6, '#0b0c0f');
+    g.addColorStop(1, '#070809');
     ctx.fillStyle = g; ctx.fillRect(0, 0, 16, 512);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   }, []);
@@ -130,21 +134,28 @@ function Studio({ visible }) {
         <sphereGeometry args={[40, 32, 16]} />
         <meshBasicMaterial map={backdrop} side={THREE.BackSide} depthWrite={false} toneMapped={false} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[60, 60]} />
+      {/* Soft studio floor — a BLURRED reflection that fades into the backdrop,
+          not a perfect black mirror (the old 2048 mirror read as the car
+          floating over a void, and choked the GPU-less capture renderer). */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+        <planeGeometry args={[44, 44]} />
         <MeshReflectorMaterial
-          resolution={2048}
-          mixBlur={0}
-          mixStrength={1.6}
-          blur={[0, 0]}
-          mirror={1}
-          color="#05070a"
-          metalness={0.95}
-          roughness={0.04}
-          depthScale={0}
+          resolution={isMobile ? 512 : 1024}
+          mixBlur={1}
+          mixStrength={0.65}
+          blur={[420, 160]}
+          mirror={0.55}
+          color="#0a0c10"
+          metalness={0.55}
+          roughness={0.72}
+          depthScale={1.1}
+          minDepthThreshold={0.4}
+          maxDepthThreshold={1.25}
           reflectorOffset={0.01}
         />
       </mesh>
+      {/* grounds the car so it sits ON the floor instead of hovering over it */}
+      <ContactShadows position={[0, 0.01, 0]} scale={13} far={4} blur={2.6} opacity={0.55} resolution={isMobile ? 512 : 1024} frames={Infinity} color="#000000" />
     </group>
   );
 }
@@ -192,11 +203,11 @@ export default function BuildExperience({ mood }) {
       <Suspense fallback={null}>
         <ScrollControls pages={PAGES} damping={0.3}>
           <Background building={building} />
-          {/* HDRI drives reflections on the reveal materials only */}
+          {/* HDRI drives reflections on the chrome + paint materials */}
           <Environment files={mood.hdri} environmentIntensity={0.9} background={false} />
 
           {/* studio reveal — visible after the cut */}
-          <Studio visible={!building} />
+          <Studio visible={!building} isMobile={isMobile} />
 
           {/* viewport furniture — visible during the build */}
           <group visible={building}>
@@ -217,8 +228,8 @@ export default function BuildExperience({ mood }) {
             <RigCards />
           </group>
 
-          {/* 3-point reveal rig (only lights the render materials) — dialled back
-              so the studio floor + backdrop don't blow out into a white wash. */}
+          {/* 3-point reveal rig (only lights the chrome + render materials) —
+              dialled back so the studio floor + backdrop don't blow out. */}
           <rectAreaLight color="#dfe6ff" intensity={6.2} width={7} height={5} position={[-7, 6, 5.5]} />
           <rectAreaLight color="#cdd8ff" intensity={3.8} width={9} height={5} position={[3, 2.2, -8]} />
           <rectAreaLight color="#ffffff" intensity={2.1} width={6} height={6} position={[0, 7, 0.5]} />
@@ -231,12 +242,12 @@ export default function BuildExperience({ mood }) {
           {building && DIMS.map((dseg) => <HUD key={dseg.t} p={dseg.p} t={dseg.t} />)}
 
           <Scroll html style={{ width: '100%' }}>
-            <BuildLabels building={building} />
+            <BuildLabels />
           </Scroll>
         </ScrollControls>
 
         <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-          <Bloom mipmapBlur intensity={building ? 0.3 : 0.28} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={0.5} />
+          <Bloom mipmapBlur intensity={building ? 0.3 : 0.32} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={0.5} />
           <ToneMapping mode={ToneMappingMode.AGX} />
         </EffectComposer>
         <AdaptiveDpr pixelated />
@@ -246,14 +257,15 @@ export default function BuildExperience({ mood }) {
   );
 }
 
-// Scroll-synced captions: the build phase reads like a modelling timeline, the
-// reveal flips to the product line.
-function BuildLabels({ building }) {
+// Scroll-synced captions: modelling timeline (block-out → chrome panels → coat)
+// then the product line (360 spin → finished car).
+function BuildLabels() {
   const steps = [
-    { k: 'PRIMITIVES', n: 'Block out the body' },
-    { k: 'WIREFRAME', n: 'Refine the panels' },
-    { k: 'PAINT', n: 'Coat the body' },
-    { k: 'DRIVE', n: '911 GT3 RS' },
+    { k: 'BLOCK OUT', n: 'Primitive geometry', c: '#88ccff' },
+    { k: 'PANELS', n: 'Forged in chrome', c: '#c6ccd4' },
+    { k: 'COAT', n: 'Lay the paint', c: '#9B6CFF' },
+    { k: 'TURNTABLE', n: 'Full 360', c: '#9B6CFF' },
+    { k: 'DRIVE', n: '911 GT3 RS', c: '#9B6CFF' },
   ];
   return (
     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}>
@@ -275,7 +287,7 @@ function BuildLabels({ building }) {
                 fontSize: '11px',
                 letterSpacing: '0.34em',
                 textTransform: 'uppercase',
-                color: i < 2 ? '#88ccff' : '#9B6CFF',
+                color: s.c,
               }}
             >
               {String(i + 1).padStart(2, '0')} — {s.k}
