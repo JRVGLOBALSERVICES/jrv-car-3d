@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { Environment, MeshReflectorMaterial } from '@react-three/drei';
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
+import LaserGrid from './LaserGrid';
 
 function gradientTexture(top, bot) {
   const c = document.createElement('canvas');
@@ -41,7 +42,7 @@ function Rect({ color, intensity, width, height, position, target = [0, 0.5, 0] 
   return <rectAreaLight ref={ref} color={color} intensity={intensity} width={width} height={height} position={position} />;
 }
 
-export default function SceneRig({ mood }) {
+export default function SceneRig({ mood, isMobile = false }) {
   useEffect(() => {
     RectAreaLightUniformsLib.init();
   }, []);
@@ -51,6 +52,12 @@ export default function SceneRig({ mood }) {
     () => radialTexture([[0, 'rgba(0,0,0,0.72)'], [0.55, 'rgba(0,0,0,0.3)'], [1, 'rgba(0,0,0,0)']]),
     []
   );
+  // accent wash rising behind the car — the reel's coloured backdrop glow
+  const accentGlow = useMemo(() => {
+    const a = new THREE.Color(mood.accent);
+    const toRGBA = (al) => `rgba(${Math.round(a.r * 255)},${Math.round(a.g * 255)},${Math.round(a.b * 255)},${al})`;
+    return radialTexture([[0, toRGBA(0.55)], [0.45, toRGBA(0.16)], [1, toRGBA(0)]]);
+  }, [mood.accent]);
 
   return (
     <>
@@ -63,6 +70,19 @@ export default function SceneRig({ mood }) {
         <meshBasicMaterial map={backdrop} side={THREE.BackSide} depthWrite={false} toneMapped={false} />
       </mesh>
 
+      {/* Accent wash rising behind the car (reel's coloured backdrop glow) — additive so Bloom lights it */}
+      <mesh position={[0, 3.0, -11]} scale={[26, 16, 1]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial
+          map={accentGlow}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          opacity={0.9}
+          toneMapped={false}
+        />
+      </mesh>
+
       {/* Boosted 3-point rig ported from the verified render */}
       <Rect color={mood.key_.color} intensity={mood.key_.power} width={7} height={5} position={mood.key_.pos} />
       <Rect color={mood.rim.color} intensity={mood.rim.power} width={4.5} height={3} position={mood.rim.pos} target={[0, 0.6, 0]} />
@@ -71,23 +91,27 @@ export default function SceneRig({ mood }) {
       <Rect color={mood.key_.color} intensity={mood.key_.power * 0.5} width={6} height={6} position={[0, 7, 0.5]} target={[0, 0, 0]} />
       <ambientLight intensity={0.09} />
 
-      {/* Wet-asphalt mirror floor */}
+      {/* Wet-asphalt mirror floor — sharper mirror to match the reel's glass floor.
+          Half-res reflection target on mobile to avoid GPU-memory white-screens. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
-          resolution={1024}
-          mixBlur={1.1}
-          mixStrength={2.2}
-          blur={[400, 100]}
-          mirror={0.55}
-          color="#0a0c10"
-          metalness={0.75}
-          roughness={0.35}
+          resolution={isMobile ? 512 : 1024}
+          mixBlur={0.7}
+          mixStrength={2.6}
+          blur={isMobile ? [300, 80] : [400, 100]}
+          mirror={0.78}
+          color="#070a0e"
+          metalness={0.85}
+          roughness={0.22}
           depthScale={1.1}
           minDepthThreshold={0.4}
           maxDepthThreshold={1.4}
         />
       </mesh>
+
+      {/* Animated accent laser-grid (the reel signature) — reflected by the mirror floor */}
+      <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} />
 
       {/* Soft contact shadow grounding the car on the reflection */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0.2]} scale={[3.4, 4.6, 1]}>

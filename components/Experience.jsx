@@ -12,10 +12,10 @@ import SceneRig from './SceneRig';
 import CameraDirector, { SHOTS } from './CameraDirector';
 import { ColorGrade } from './Grade';
 
-function Effects({ mood }) {
+function Effects({ mood, isMobile }) {
   return (
-    <EffectComposer disableNormalPass multisampling={4}>
-      <Bloom mipmapBlur intensity={0.55} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={0.7} />
+    <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
+      <Bloom mipmapBlur intensity={1.05} luminanceThreshold={0.62} luminanceSmoothing={0.25} radius={0.85} />
       <ColorGrade
         saturation={mood.grade.saturation}
         vignette={mood.grade.vignette}
@@ -36,15 +36,15 @@ export default function Experience({ mood, mode = 'scroll' }) {
 
   return (
     <Canvas
-      shadows
-      dpr={[1, isMobile ? 2 : 1.85]}
+      shadows={!isMobile}
+      dpr={[1, isMobile ? 1.3 : 1.85]}
       gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{ fov: SHOTS[0].fov, near: 0.05, far: 500, position: mode === 'orbit' ? [4.4, 1.2, 5.0] : SHOTS[0].pos }}
     >
       <Suspense fallback={null}>
         {mode === 'scroll' ? (
           <ScrollControls pages={SHOTS.length} damping={0.3}>
-            <SceneRig mood={mood} />
+            <SceneRig mood={mood} isMobile={isMobile} />
             <Car mood={mood} spinRef={spinRef} />
             <CameraDirector spinRef={spinRef} reduceMotion={reduceMotion} />
             <Scroll html style={{ width: '100%' }}>
@@ -53,7 +53,7 @@ export default function Experience({ mood, mode = 'scroll' }) {
           </ScrollControls>
         ) : (
           <>
-            <SceneRig mood={mood} />
+            <SceneRig mood={mood} isMobile={isMobile} />
             <Car mood={mood} spinRef={spinRef} />
             <OrbitControls
               enableDamping
@@ -67,7 +67,7 @@ export default function Experience({ mood, mode = 'scroll' }) {
             />
           </>
         )}
-        <Effects mood={mood} />
+        <Effects mood={mood} isMobile={isMobile} />
         <AdaptiveDpr pixelated />
         <Preload all />
       </Suspense>

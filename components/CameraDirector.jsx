@@ -15,7 +15,15 @@ export const SHOTS = [
   { id: '05', name: 'Hero orbit', pos: [3.8, 2.55, 4.2], tgt: [0, 0.5, 0], fov: 38 },
 ];
 
-const easeInOut = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+// Hold-then-snap: each shot holds its framing for the first ~58% of its scroll
+// segment, then snaps to the next over the last ~42% — the reel's "cut between
+// framed shots" feel rather than a constant slow drift.
+const holdSnap = (t) => {
+  const hold = 0.58;
+  if (t <= hold) return 0;
+  const u = (t - hold) / (1 - hold);
+  return u * u * (3 - 2 * u); // smoothstep on the back portion
+};
 
 export default function CameraDirector({ spinRef, reduceMotion }) {
   const scroll = useScroll();
@@ -37,7 +45,7 @@ export default function CameraDirector({ spinRef, reduceMotion }) {
     const n = SHOTS.length - 1;
     const seg = THREE.MathUtils.clamp(offset, 0, 1) * n;
     const i = Math.min(Math.floor(seg), n - 1);
-    const f = easeInOut(seg - i);
+    const f = holdSnap(seg - i);
     const a = SHOTS[i];
     const b = SHOTS[i + 1];
 
