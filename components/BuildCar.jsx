@@ -295,14 +295,16 @@ export default function BuildCar({ phase, paintBase = '#1b2330', accent = '#88cc
   // ---- drive the two sweeps + the "alive" payoff from scroll reveal --------
   useFrame((_, delta) => {
     const reveal = phase.current.reveal ?? 0;
-    // 1) panels forge in chrome nose-to-tail, fully built by ~0.40
-    uniforms.uChrome.value = THREE.MathUtils.smoothstep(reveal, 0.1, 0.4);
-    // 2) paint coats over the chrome, fully on by ~0.72, then HOLDS through the
-    //    tail (the 360) so the finished car is always fully painted at the end.
-    uniforms.uPaint.value = THREE.MathUtils.smoothstep(reveal, 0.46, 0.72);
+    // 1) panels forge in chrome nose-to-tail, fully built by ~0.42
+    uniforms.uChrome.value = THREE.MathUtils.smoothstep(reveal, 0.1, 0.42);
+    // 2) paint coats over the chrome ACROSS the full 360 (0.48 → 0.76), so the
+    //    coat line travels down the body while the camera circles the car — you
+    //    see the paint wrap every side. Fully on by ~0.76, then HOLDS so the
+    //    finished car is fully painted for the drive payoff.
+    uniforms.uPaint.value = THREE.MathUtils.smoothstep(reveal, 0.48, 0.76);
 
-    // alive: the 360 finish → wheels roll + lights flare
-    const alive = THREE.MathUtils.smoothstep(reveal, 0.78, 0.96);
+    // alive: after the coat+360 lands → wheels roll + lights flare
+    const alive = THREE.MathUtils.smoothstep(reveal, 0.82, 0.97);
     const d = Math.min(delta, 0.05);
     if (alive > 0.001 && !reduceMotion) {
       const speed = alive * d * 9.0;

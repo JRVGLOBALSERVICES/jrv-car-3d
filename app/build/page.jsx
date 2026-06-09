@@ -10,7 +10,7 @@ const buildMood = {
   label: 'Making-of · chrome → coat → 360',
   title: ['Chrome', 'to hero'],
   blurb:
-    'The 911 assembled the way it is in the studio — primitive block-out, then panels forged in bare silver chrome, then the paint coats over the metal nose-to-tail, then a full 360 turntable of the finished car. Scroll to run the make. Real-time React Three Fiber, no video.',
+    'The 911 assembled the way it is in the studio — primitive block-out, then panels forged in bare silver chrome, then the paint coats over the metal as the car turns a full 360 so you watch it wrap every panel, landing as a finished hero. Scroll to run the make. Real-time React Three Fiber, no video.',
   hdri: '/model/modern_buildings_night_2k.hdr',
   paintBase: '#4a5d78',
   accent: '#88ccff',

@@ -92,18 +92,26 @@ function Director({ phase, setBuilding, reduceMotion }) {
       setBuilding(building);
     }
 
-    // The camera eases from a wide modelling view to the hero distance across the
-    // build + coat, settling on a front-left 3/4 by ~0.72 — then the FINISHED car
-    // does a full 360 turntable in the tail and lands back on that hero angle.
-    const r = smooth01(offset / 0.72);
-    const turn = smooth01((offset - 0.72) / 0.28); // one full revolution
+    // The camera dollies from a wide modelling view to the hero distance across
+    // the block-out + chrome (offset 0 → 0.46). Then — the key change — it does
+    // a FULL 360 turntable *while the paint coats on* (0.46 → 0.78), so you watch
+    // the coat wrap around the whole car from every angle (front, side, rear,
+    // far side) instead of from one fixed 3/4. It lands back on the hero angle
+    // (2π ≡ 0) and holds there for the finished "drive" payoff.
+    const buildIn = smooth01(offset / 0.46);
     const heroAz = -0.62; // front-left 3/4 hero
-    const buildAz = THREE.MathUtils.lerp(-0.55, heroAz, r); // continuous into the turn
-    const az =
-      (offset < 0.72 ? buildAz : heroAz + turn * Math.PI * 2) +
-      (reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.03);
-    const radius = THREE.MathUtils.lerp(6.4, 5.0, r);
-    const height = THREE.MathUtils.lerp(2.6, 1.7, r);
+    let az;
+    if (offset < 0.46) {
+      az = THREE.MathUtils.lerp(-0.32, heroAz, buildIn); // ease to the hero start angle
+    } else if (offset < 0.78) {
+      const coatT = smooth01((offset - 0.46) / 0.32);
+      az = heroAz + coatT * Math.PI * 2; // one full revolution synced to the coat
+    } else {
+      az = heroAz; // revolution complete, hold the hero 3/4 for the payoff
+    }
+    az += reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.03;
+    const radius = THREE.MathUtils.lerp(6.4, 5.0, buildIn);
+    const height = THREE.MathUtils.lerp(2.6, 1.7, buildIn);
 
     const want = new THREE.Vector3(Math.cos(az) * radius, height, Math.sin(az) * radius);
 
@@ -283,7 +291,7 @@ function BuildLabels() {
     { k: 'BLOCK OUT', n: 'Primitive geometry', c: '#88ccff' },
     { k: 'PANELS', n: 'Forged in chrome', c: '#c6ccd4' },
     { k: 'COAT', n: 'Lay the paint', c: '#9B6CFF' },
-    { k: 'TURNTABLE', n: 'Full 360', c: '#9B6CFF' },
+    { k: '360° COAT', n: 'Wrap every panel', c: '#9B6CFF' },
     { k: 'DRIVE', n: '911 GT3 RS', c: '#9B6CFF' },
   ];
   return (

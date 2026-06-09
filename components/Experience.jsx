@@ -37,21 +37,24 @@ export default function Experience({ mood, mode = 'scroll' }) {
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches;
 
+  // Per-mood orbit camera so the orbit pages don't all circle identically.
+  const orbit = mood.orbit ?? { start: [4.4, 1.2, 5.0], fov: 38, autoRotateSpeed: 0.45, polarMax: 0.495, target: [0, 0.5, 0] };
+
   return (
     <Canvas
       shadows={!isMobile}
       dpr={[1, isMobile ? 1.0 : 1.85]}
       gl={{ antialias: !isMobile, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{
-        // Orbit pages frame statically — widen fov + pull back on mobile so the
-        // portrait viewport doesn't balloon the car (scroll mode does this live
-        // in CameraDirector). Desktop keeps the original framing.
-        fov: mode === 'orbit' && isMobile ? 46 : SHOTS[0].fov,
+        // Orbit pages frame statically from the mood's own camera — widen fov +
+        // pull back on mobile so the portrait viewport doesn't balloon the car
+        // (scroll mode does this live in CameraDirector).
+        fov: mode === 'orbit' ? (isMobile ? orbit.fov + 6 : orbit.fov) : SHOTS[0].fov,
         near: 0.05,
         far: 500,
         position:
           mode === 'orbit'
-            ? (isMobile ? [5.6, 1.6, 6.4] : [4.4, 1.2, 5.0])
+            ? (isMobile ? [orbit.start[0] + 1.2, orbit.start[1], orbit.start[2] + 1.4] : orbit.start)
             : SHOTS[0].pos,
       }}
       onCreated={({ gl }) => {
@@ -86,10 +89,10 @@ export default function Experience({ mood, mode = 'scroll' }) {
               dampingFactor={0.06}
               minDistance={isMobile ? 4.8 : 3.4}
               maxDistance={isMobile ? 14 : 12}
-              maxPolarAngle={Math.PI * 0.495}
+              maxPolarAngle={Math.PI * (orbit.polarMax ?? 0.495)}
               autoRotate={!reduceMotion}
-              autoRotateSpeed={0.45}
-              target={[0, 0.5, 0]}
+              autoRotateSpeed={orbit.autoRotateSpeed ?? 0.45}
+              target={orbit.target ?? [0, 0.5, 0]}
             />
           </>
         )}

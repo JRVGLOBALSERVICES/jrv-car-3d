@@ -5,6 +5,8 @@ import { Environment, MeshReflectorMaterial } from '@react-three/drei';
 import * as THREE from 'three';
 import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLightUniformsLib.js';
 import LaserGrid from './LaserGrid';
+import CityLights from './CityLights';
+import DustField from './DustField';
 
 function gradientTexture(top, bot) {
   const c = document.createElement('canvas');
@@ -119,9 +121,18 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
         />
       </mesh>
 
-      {/* Animated accent laser-grid (the reel signature) — reflected by the mirror floor.
-          Suppressed for the iridescent void (mood.noGrid). */}
-      {!mood.noGrid && <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} speedRef={spinRef} />}
+      {/* Per-page signature scene element — each route gets a DIFFERENT one so the
+          pages don't read as the same scene recoloured:
+            grid    → home reel: streaming accent laser-grid (speed)
+            skyline → /night-city: neon vertical light-bar field + bokeh
+            sodium  → /night-street: warm light-pool + drifting dust motes
+            void    → /iridescent: nothing (paint is the sole hero)
+          Falls back to the laser-grid when a mood predates `signature`. */}
+      {(mood.signature ?? (mood.noGrid ? 'void' : 'grid')) === 'grid' && (
+        <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} speedRef={spinRef} />
+      )}
+      {mood.signature === 'skyline' && <CityLights isMobile={isMobile} />}
+      {mood.signature === 'sodium' && <DustField isMobile={isMobile} color={mood.windColor} />}
 
       {/* Soft contact shadow grounding the car on the reflection */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0.2]} scale={[3.4, 4.6, 1]}>
