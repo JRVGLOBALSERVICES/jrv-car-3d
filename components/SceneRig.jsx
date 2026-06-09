@@ -102,14 +102,14 @@ export default function SceneRig({ mood, isMobile = false }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
-          resolution={isMobile ? 512 : 1024}
-          mixBlur={0.7}
-          mixStrength={2.6}
-          blur={isMobile ? [300, 80] : [400, 100]}
+          resolution={isMobile ? 768 : 1536}
+          mixBlur={0.5}
+          mixStrength={1.7}
+          blur={isMobile ? [140, 50] : [200, 70]}
           mirror={mood.floorMirror ?? 0.78}
           color={mood.floorColor ?? '#070a0e'}
           metalness={0.85}
-          roughness={mood.floorRoughness ?? 0.22}
+          roughness={mood.floorRoughness ?? 0.32}
           depthScale={1.1}
           minDepthThreshold={0.4}
           maxDepthThreshold={1.4}

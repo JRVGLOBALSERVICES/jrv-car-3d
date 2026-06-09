@@ -34,7 +34,6 @@ function applyIridescentPaint(m) {
           h = fract(h);
           return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0);
         }
-        float jrvHash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
         void main() {`
       )
       .replace(
@@ -45,16 +44,15 @@ function applyIridescentPaint(m) {
           vec3 nn = normalize(normal);
           float ndv = clamp(dot(nn, vd), 0.0, 1.0);
           float fres = pow(1.0 - ndv, 1.55);
-          // fine flake sparkle (screen-space hash → metallic shimmer)
-          float fl = jrvHash(floor(gl_FragCoord.xy * 0.5));
-          // facing → warm (orange/red), grazing → cool (blue/violet). Wider span
-          // so a 3/4 view shows the whole spectrum walk across the panels.
-          float h = (1.0 - ndv) * 0.92 + 0.04 + (fl - 0.5) * 0.05;
+          // facing → warm (orange/red), grazing → cool (blue/violet). Smooth,
+          // view-stable spectrum (no screen-space hash → no shimmer/grain) so a
+          // 3/4 view shows the whole spectrum walk cleanly across the panels.
+          float h = (1.0 - ndv) * 0.92 + 0.04;
           vec3 iri = jrvHue(h);
           // tint the lit surface with the spectral colour (dominant over the base)
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.12 + iri * 0.9, 0.94);
           // fresnel-weighted glow on the grazing edges (Bloom catches this)
-          totalEmissiveRadiance += iri * (fres * 1.7 + 0.16) * (0.6 + 0.7 * fl);
+          totalEmissiveRadiance += iri * (fres * 1.5 + 0.14);
         }`
       );
   };
