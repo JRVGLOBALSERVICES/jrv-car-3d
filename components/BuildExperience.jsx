@@ -224,7 +224,7 @@ function Studio({ visible, isMobile }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[44, 44]} />
         <MeshReflectorMaterial
-          resolution={isMobile ? 256 : 1024}
+          resolution={isMobile ? 512 : 1024}
           mixBlur={isMobile ? 0 : 1}
           mixStrength={0.8}
           // Mobile: skip the blur kernel (per-frame full-screen pass, the heaviest
@@ -280,8 +280,10 @@ export default function BuildExperience({ mood }) {
   return (
     <Canvas
       shadows={!isMobile}
-      dpr={[1, isMobile ? 1.0 : 1.85]}
-      gl={{ antialias: !isMobile, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
+      // Mobile DPR was 1.0 (soft/low-res on a 2.5–3× phone). 1.6 restores HD
+      // crispness; the per-frame mirror blur stays killed on mobile below.
+      dpr={[1, isMobile ? 1.6 : 1.85]}
+      gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{ fov: 38, near: 0.05, far: 500, position: [5.6, 2.4, 4.2] }}
       onCreated={({ gl }) => {
         gl.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
@@ -333,8 +335,10 @@ export default function BuildExperience({ mood }) {
           </Scroll>
         </ScrollControls>
 
-        <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-          <Bloom mipmapBlur intensity={building ? 0.3 : 0.32} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={0.5} />
+        <EffectComposer disableNormalPass multisampling={isMobile ? 2 : 4}>
+          {/* MSAA 2 on mobile (the real edge-AA when a composer is active) +
+              tighter, dimmer bloom so the showroom washes glow without heavy rays. */}
+          <Bloom mipmapBlur intensity={(building ? 0.3 : 0.32) * (isMobile ? 0.7 : 1)} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={isMobile ? 0.42 : 0.46} />
           <ToneMapping mode={ToneMappingMode.AGX} />
         </EffectComposer>
         <AdaptiveDpr pixelated />

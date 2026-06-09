@@ -37,23 +37,26 @@ const frag = /* glsl */ `
     // the car — the glow/fade stays centred (uses the un-scrolled uv), so only
     // the lines move. This is the ground-speed cue that kills the "parked" read.
     vec2 guv = uv + vec2(0.0, uScroll);
-    float fine  = gridLine(guv, 30.0) * 0.42;
-    float major = gridLine(guv, 7.5) * 1.25;
+    float fine  = gridLine(guv, 30.0) * 0.38;
+    float major = gridLine(guv, 7.5) * 0.92;
     float grid  = max(fine, major);
 
     float d = distance(uv, vec2(0.5));
     float fade = smoothstep(0.5, 0.06, d);
 
-    // expanding laser ring sweeping outward from the car
+    // expanding laser ring sweeping outward from the car — trimmed so the sweep
+    // line reads as a soft pulse, not a hard bright ray that Bloom blows out.
     float phase = fract(uTime * 0.085);
     float ring  = abs(d - phase * 0.52);
-    float sweep = smoothstep(0.018, 0.0, ring) * 1.4 * (1.0 - phase);
+    float sweep = smoothstep(0.018, 0.0, ring) * 0.85 * (1.0 - phase);
 
     // at speed, the major lines smear into motion bands along the travel axis
-    float band = gridLine(vec2(0.0, guv.y), 7.5) * uSpeed * 0.7;
+    float band = gridLine(vec2(0.0, guv.y), 7.5) * uSpeed * 0.6;
 
     float a = (grid + sweep + band) * fade * uIntensity;
-    vec3 col = uColor * (1.0 + sweep * 2.2 + uSpeed * 0.6);
+    // lower colour-boost on the sweep/speed so the grid stays a coloured glow
+    // rather than clipping to a white-hot streak under the bloom pass.
+    vec3 col = uColor * (1.0 + sweep * 1.3 + uSpeed * 0.45);
     gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
   }
 `;

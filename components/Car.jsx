@@ -51,8 +51,9 @@ function applyIridescentPaint(m) {
           vec3 iri = jrvHue(h);
           // tint the lit surface with the spectral colour (dominant over the base)
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.12 + iri * 0.9, 0.94);
-          // fresnel-weighted glow on the grazing edges (Bloom catches this)
-          totalEmissiveRadiance += iri * (fres * 1.5 + 0.14);
+          // fresnel-weighted glow on the grazing edges (Bloom catches this) —
+          // trimmed so the rim glow stays a spectral sheen, not a blown-out ray.
+          totalEmissiveRadiance += iri * (fres * 1.1 + 0.12);
         }`
       );
   };

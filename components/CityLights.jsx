@@ -45,7 +45,7 @@ export default function CityLights({ isMobile = false }) {
         phase: Math.random() * Math.PI * 2,
         tw: 0.5 + Math.random() * 0.9, // twinkle rate
         bob: 0.05 + Math.random() * 0.14,
-        bright: 0.55 + Math.random() * 0.8,
+        bright: 0.42 + Math.random() * 0.58,
         col: new THREE.Color(PALETTE[Math.floor(Math.random() * PALETTE.length)]),
       });
     }
@@ -88,7 +88,7 @@ export default function CityLights({ isMobile = false }) {
       <planeGeometry args={[1, 1]} />
       <meshBasicMaterial
         transparent
-        opacity={0.85}
+        opacity={0.7}
         depthWrite={false}
         blending={THREE.AdditiveBlending}
         toneMapped={false}

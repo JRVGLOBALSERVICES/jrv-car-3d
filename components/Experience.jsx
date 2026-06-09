@@ -15,10 +15,21 @@ import { ColorGrade } from './Grade';
 
 function Effects({ mood, isMobile }) {
   return (
-    <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-      {/* Higher luminanceThreshold so only true speculars bloom — keeps the
-          mid-tones crisp instead of washing the whole car into haze. */}
-      <Bloom mipmapBlur intensity={mood.bloom ?? 0.5} luminanceThreshold={0.85} luminanceSmoothing={0.32} radius={0.55} />
+    <EffectComposer disableNormalPass multisampling={isMobile ? 2 : 4}>
+      {/* With a composer active the canvas `antialias` is bypassed — the composer
+          renders to its own buffer, so MSAA here is the real edge-AA lever. 2 on
+          mobile (cheap on tile GPUs) kills the stair-stepping. Bloom is dialled
+          back + tightened so the emissive grid/neon read as glow, not heavy rays:
+          lower intensity (more so on mobile, where Rj saw it blown out), higher
+          threshold (fewer things bloom), smaller radius (tighter halo, less smear,
+          and less highlight-wash so colour stays saturated). */}
+      <Bloom
+        mipmapBlur
+        intensity={(mood.bloom ?? 0.5) * (isMobile ? 0.58 : 0.82)}
+        luminanceThreshold={isMobile ? 0.92 : 0.88}
+        luminanceSmoothing={0.3}
+        radius={isMobile ? 0.4 : 0.46}
+      />
       <ColorGrade
         saturation={mood.grade.saturation}
         vignette={mood.grade.vignette}
@@ -46,8 +57,12 @@ export default function Experience({ mood, mode = 'scroll' }) {
   return (
     <Canvas
       shadows={!isMobile}
-      dpr={[1, isMobile ? 1.0 : 1.85]}
-      gl={{ antialias: !isMobile, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
+      // Mobile DPR was capped at 1.0 — on a 2.5–3× phone that's a hard downsample
+      // and the source of the "soft / low-res" look. 1.6 restores HD crispness on
+      // a single-hero scene while staying well under the per-frame blur cost that
+      // caused the earlier lag (that blur stays killed in SceneRig on mobile).
+      dpr={[1, isMobile ? 1.6 : 1.85]}
+      gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{
         // Orbit pages frame statically from the mood's own camera — widen fov +
         // pull back on mobile so the portrait viewport doesn't balloon the car

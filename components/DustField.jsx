@@ -100,7 +100,7 @@ export default function DustField({ isMobile = false, color = '#ffd9a8' }) {
       {/* warm light-pool on the damp asphalt */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, 0.1]} scale={[9, 9, 1]} renderOrder={1}>
         <planeGeometry args={[1, 1]} />
-        <meshBasicMaterial map={poolTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0.9} toneMapped={false} />
+        <meshBasicMaterial map={poolTex} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0.68} toneMapped={false} />
       </mesh>
 
       {/* drifting dust motes caught in the lamp glow */}

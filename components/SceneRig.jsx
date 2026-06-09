@@ -82,7 +82,10 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
             transparent
             depthWrite={false}
             blending={THREE.AdditiveBlending}
-            opacity={0.9}
+            // softer wash — an additive glow that Bloom amplifies, so 0.9 read as a
+            // bright haze behind the car. Lower (and lower again on mobile) so it
+            // frames the car without becoming one of the "too bright" rays.
+            opacity={isMobile ? 0.46 : 0.6}
             toneMapped={false}
           />
         </mesh>
@@ -104,7 +107,7 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
-          resolution={isMobile ? 256 : 1536}
+          resolution={isMobile ? 512 : 1536}
           mixBlur={isMobile ? 0 : 0.5}
           mixStrength={1.7}
           // Mobile: no blur passes — the blur is a per-frame full-screen kernel
@@ -129,7 +132,7 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
             void    → /iridescent: nothing (paint is the sole hero)
           Falls back to the laser-grid when a mood predates `signature`. */}
       {(mood.signature ?? (mood.noGrid ? 'void' : 'grid')) === 'grid' && (
-        <LaserGrid color={mood.accent} intensity={isMobile ? 0.85 : 1.0} speedRef={spinRef} />
+        <LaserGrid color={mood.accent} intensity={isMobile ? 0.58 : 0.82} speedRef={spinRef} />
       )}
       {mood.signature === 'skyline' && <CityLights isMobile={isMobile} />}
       {mood.signature === 'sodium' && <DustField isMobile={isMobile} color={mood.windColor} />}
