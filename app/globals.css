@@ -33,7 +33,7 @@ a { color: inherit; }
 
 /* chrome overlay — pointer-events pass through except on links */
 .chrome { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
-.chrome a, .chrome button { pointer-events: auto; }
+.chrome a, .chrome button, .chrome summary, .chrome details { pointer-events: auto; }
 
 .brand { position: absolute; top: var(--space-lg); left: var(--space-lg); display: flex; align-items: baseline; gap: 10px; }
 .brand .mark { font-weight: 700; font-size: 22px; letter-spacing: -0.02em; }
