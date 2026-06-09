@@ -102,10 +102,13 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
-          resolution={isMobile ? 768 : 1536}
-          mixBlur={0.5}
+          resolution={isMobile ? 256 : 1536}
+          mixBlur={isMobile ? 0 : 0.5}
           mixStrength={1.7}
-          blur={isMobile ? [140, 50] : [200, 70]}
+          // Mobile: no blur passes — the blur is a per-frame full-screen kernel
+          // and the single biggest GPU cost on a phone. A sharp low-res mirror
+          // is far cheaper and still grounds the car. Desktop keeps the soft floor.
+          blur={isMobile ? [0, 0] : [200, 70]}
           mirror={mood.floorMirror ?? 0.78}
           color={mood.floorColor ?? '#070a0e'}
           metalness={0.85}

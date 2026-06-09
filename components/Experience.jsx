@@ -40,9 +40,20 @@ export default function Experience({ mood, mode = 'scroll' }) {
   return (
     <Canvas
       shadows={!isMobile}
-      dpr={[1, isMobile ? 1.3 : 1.85]}
-      gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
-      camera={{ fov: SHOTS[0].fov, near: 0.05, far: 500, position: mode === 'orbit' ? [4.4, 1.2, 5.0] : SHOTS[0].pos }}
+      dpr={[1, isMobile ? 1.0 : 1.85]}
+      gl={{ antialias: !isMobile, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
+      camera={{
+        // Orbit pages frame statically — widen fov + pull back on mobile so the
+        // portrait viewport doesn't balloon the car (scroll mode does this live
+        // in CameraDirector). Desktop keeps the original framing.
+        fov: mode === 'orbit' && isMobile ? 46 : SHOTS[0].fov,
+        near: 0.05,
+        far: 500,
+        position:
+          mode === 'orbit'
+            ? (isMobile ? [5.6, 1.6, 6.4] : [4.4, 1.2, 5.0])
+            : SHOTS[0].pos,
+      }}
       onCreated={({ gl }) => {
         // A lost context (phone GPU evicts WebGL under memory pressure / tab
         // switch) would otherwise blank the canvas permanently. preventDefault
@@ -73,8 +84,8 @@ export default function Experience({ mood, mode = 'scroll' }) {
             <OrbitControls
               enableDamping
               dampingFactor={0.06}
-              minDistance={3.4}
-              maxDistance={12}
+              minDistance={isMobile ? 4.8 : 3.4}
+              maxDistance={isMobile ? 14 : 12}
               maxPolarAngle={Math.PI * 0.495}
               autoRotate={!reduceMotion}
               autoRotateSpeed={0.45}

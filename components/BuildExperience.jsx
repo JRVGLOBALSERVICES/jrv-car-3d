@@ -76,7 +76,7 @@ function RigCards() {
 
 function Director({ phase, setBuilding, reduceMotion }) {
   const scroll = useScroll();
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const tgt = useRef(new THREE.Vector3(0, 0.55, 0));
   const lastBuilding = useRef(true);
 
@@ -106,9 +106,24 @@ function Director({ phase, setBuilding, reduceMotion }) {
     const height = THREE.MathUtils.lerp(2.6, 1.7, r);
 
     const want = new THREE.Vector3(Math.cos(az) * radius, height, Math.sin(az) * radius);
+
+    // Responsive framing — fov is vertical, so portrait phones balloon the car.
+    // Dolly the orbit out (relative to the look target) + gently widen fov.
+    const aspect = size.width / Math.max(size.height, 1);
+    const fit = THREE.MathUtils.clamp(1.55 / aspect, 1, 1.64);
+    const ty0 = 0.6;
+    want.x *= fit;
+    want.z *= fit;
+    want.y = ty0 + (want.y - ty0) * fit;
+    const fov = 38 * THREE.MathUtils.clamp(1.5 / aspect, 1, 1.16);
+    if (Math.abs(camera.fov - fov) > 0.01) {
+      camera.fov = fov;
+      camera.updateProjectionMatrix();
+    }
+
     const s = 1 - Math.pow(0.0016, d);
     camera.position.lerp(want, reduceMotion ? 1 : s);
-    tgt.current.lerp(new THREE.Vector3(0, 0.6, 0), s);
+    tgt.current.lerp(new THREE.Vector3(0, ty0, 0), s);
     camera.lookAt(tgt.current);
   });
   return null;
@@ -140,10 +155,13 @@ function Studio({ visible, isMobile }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[44, 44]} />
         <MeshReflectorMaterial
-          resolution={isMobile ? 512 : 1024}
-          mixBlur={1}
+          resolution={isMobile ? 256 : 1024}
+          mixBlur={isMobile ? 0 : 1}
           mixStrength={0.65}
-          blur={[420, 160]}
+          // Mobile: skip the [420,160] blur kernel — it's a per-frame full-screen
+          // pass and the heaviest single cost on a phone. Low-res sharp mirror +
+          // high roughness still reads as a soft studio floor under Bloom.
+          blur={isMobile ? [0, 0] : [420, 160]}
           mirror={0.55}
           color="#0a0c10"
           metalness={0.55}
@@ -154,8 +172,9 @@ function Studio({ visible, isMobile }) {
           reflectorOffset={0.01}
         />
       </mesh>
-      {/* grounds the car so it sits ON the floor instead of hovering over it */}
-      <ContactShadows position={[0, 0.01, 0]} scale={13} far={4} blur={2.6} opacity={0.55} resolution={isMobile ? 512 : 1024} frames={Infinity} color="#000000" />
+      {/* grounds the car so it sits ON the floor instead of hovering over it.
+          Mobile bakes it once (frames=1) instead of re-rendering every frame. */}
+      <ContactShadows position={[0, 0.01, 0]} scale={13} far={4} blur={2.6} opacity={0.55} resolution={isMobile ? 256 : 1024} frames={isMobile ? 1 : Infinity} color="#000000" />
     </group>
   );
 }
@@ -193,8 +212,8 @@ export default function BuildExperience({ mood }) {
   return (
     <Canvas
       shadows={!isMobile}
-      dpr={[1, isMobile ? 1.3 : 1.85]}
-      gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
+      dpr={[1, isMobile ? 1.0 : 1.85]}
+      gl={{ antialias: !isMobile, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{ fov: 38, near: 0.05, far: 500, position: [5.6, 2.4, 4.2] }}
       onCreated={({ gl }) => {
         gl.domElement.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);

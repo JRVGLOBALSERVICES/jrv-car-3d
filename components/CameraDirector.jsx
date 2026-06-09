@@ -27,7 +27,7 @@ const holdSnap = (t) => {
 
 export default function CameraDirector({ spinRef, reduceMotion }) {
   const scroll = useScroll();
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const tgt = useRef(new THREE.Vector3(...SHOTS[0].tgt));
   const desiredPos = useRef(new THREE.Vector3(...SHOTS[0].pos));
   const lastOffset = useRef(0);
@@ -57,7 +57,21 @@ export default function CameraDirector({ spinRef, reduceMotion }) {
     const tx = THREE.MathUtils.lerp(a.tgt[0], b.tgt[0], f);
     const ty = THREE.MathUtils.lerp(a.tgt[1], b.tgt[1], f);
     const tz = THREE.MathUtils.lerp(a.tgt[2], b.tgt[2], f);
-    const fov = THREE.MathUtils.lerp(a.fov, b.fov, f);
+    let fov = THREE.MathUtils.lerp(a.fov, b.fov, f);
+
+    // Responsive framing. fov is VERTICAL in three.js, so a portrait phone
+    // (aspect ~0.46) sees a tiny horizontal slice for the same fov and the car
+    // balloons + crops. Compensate by (a) dollying the camera back along its
+    // view direction — keeps the framing angle, no fisheye — and (b) a gentle
+    // fov widen so we don't pull to infinity. Desktop (aspect ≥ ~1.55) is a no-op.
+    const aspect = size.width / Math.max(size.height, 1);
+    const fit = THREE.MathUtils.clamp(1.55 / aspect, 1, 1.64);
+    const fovMul = THREE.MathUtils.clamp(1.5 / aspect, 1, 1.16);
+    fov *= fovMul;
+    // dolly desiredPos away from the target by `fit`
+    desiredPos.current.x = tx + (desiredPos.current.x - tx) * fit;
+    desiredPos.current.y = ty + (desiredPos.current.y - ty) * fit;
+    desiredPos.current.z = tz + (desiredPos.current.z - tz) * fit;
 
     // slow drift on the held shot so a static frame still breathes
     const breathe = reduceMotion ? 0 : Math.sin(performance.now() * 0.00018) * 0.12;
