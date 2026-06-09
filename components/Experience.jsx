@@ -40,6 +40,16 @@ export default function Experience({ mood, mode = 'scroll' }) {
       dpr={[1, isMobile ? 1.3 : 1.85]}
       gl={{ antialias: true, powerPreference: 'high-performance', outputColorSpace: THREE.SRGBColorSpace }}
       camera={{ fov: SHOTS[0].fov, near: 0.05, far: 500, position: mode === 'orbit' ? [4.4, 1.2, 5.0] : SHOTS[0].pos }}
+      onCreated={({ gl }) => {
+        // A lost context (phone GPU evicts WebGL under memory pressure / tab
+        // switch) would otherwise blank the canvas permanently. preventDefault
+        // lets the browser + r3f restore it instead of dying.
+        gl.domElement.addEventListener(
+          'webglcontextlost',
+          (e) => e.preventDefault(),
+          false,
+        );
+      }}
     >
       <Suspense fallback={null}>
         {mode === 'scroll' ? (
