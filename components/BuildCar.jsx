@@ -5,98 +5,263 @@ import { useGLTF } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-// The "making-of" car (reel DZQgjJ9Mpmj). One cloned GLB that switches between
-// two looks driven by the shared `phase` ref:
-//   • build  → every mesh drawn as a light-blue 3D-viewport wireframe (#88CCFF)
-//   • reveal → original materials, lightly enhanced for a clean studio render
-// The reel cuts hard between the two, so we hard-swap materials at the threshold
-// rather than cross-fading (a swap is cheap — just a draw-mode change).
-export default function BuildCar({ phase, paintBase = '#1b2330' }) {
-  const { scene } = useGLTF('/model/porsche-gt3rs-wheels.glb', true);
-  const car = useMemo(() => scene.clone(true), [scene]);
-  const applied = useRef(null); // 'wire' | 'render' — avoids re-swapping every frame
+// The "making-of" car (reel DZQgjJ9Mpmj), reworked per Rj's note: instead of a
+// hard wire→render cut, the paint MATERIALIZES onto the car. Two overlaid clones
+// driven by one shared `uBuild` (0→1) uniform:
+//   • wireClone  — light-blue 3D-viewport wireframe; shows only AHEAD of the sweep
+//   • paintClone — the lit studio paint; shows only BEHIND the sweep
+// A glowing accent seam rides the boundary, so the body's paint/panels wash on
+// nose-to-tail (the opposite of "shedding skin"). When uBuild hits 1 the car is
+// fully built, then it comes ALIVE — wheels spin, head/tail lights flare up.
+//
+// Sweep axis = world Z (the car's length; axle is world X), normalized to 0..1.
 
-  const wireMat = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        color: 0x88ccff,
-        wireframe: true,
-        toneMapped: false, // keep the viewport blue crisp under AgX
-        transparent: true,
-        opacity: 0.9,
-      }),
-    []
+const WORLD_X = new THREE.Vector3(1, 0, 0);
+const Z_MIN = -2.3;
+const Z_MAX = 2.3;
+
+// wheel node patterns (same GLB as Car.jsx — verified node graph)
+const RIM_RE = /chrome_wheels_20x9/i;
+const TYRE_RE = /Object_4\.\d/i;
+const BRAKE_RE = /brakedisc_FR/i;
+
+// Inject the build-sweep dissolve into any material. `mode`:
+//   'paint' → keep fragments BEHIND the sweep (bt <= uBuild), discard ahead
+//   'wire'  → keep fragments AHEAD of the sweep (bt >  uBuild), discard behind
+function injectSweep(m, uniforms, mode) {
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader) => {
+    if (prev) prev(shader);
+    shader.uniforms.uBuild = uniforms.uBuild;
+    shader.uniforms.uAccent = uniforms.uAccent;
+    shader.uniforms.uZMin = uniforms.uZMin;
+    shader.uniforms.uZMax = uniforms.uZMax;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vSweepW;')
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvSweepW = (modelMatrix * vec4(transformed, 1.0)).xyz;'
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform float uBuild;\nuniform vec3 uAccent;\nuniform float uZMin;\nuniform float uZMax;\nvarying vec3 vSweepW;'
+      )
+      .replace(
+        '#include <dithering_fragment>',
+        /* glsl */ `
+        {
+          float bt = clamp((vSweepW.z - uZMin) / (uZMax - uZMin), 0.0, 1.0);
+          ${
+            mode === 'paint'
+              ? 'if (bt > uBuild) discard;'
+              : 'if (bt <= uBuild) discard;'
+          }
+          // glowing seam rides the build edge (suppressed at the very ends)
+          float edge = smoothstep(0.05, 0.0, abs(bt - uBuild))
+                       * step(0.001, uBuild) * step(uBuild, 0.999);
+          gl_FragColor.rgb += uAccent * edge * ${mode === 'paint' ? '2.2' : '1.6'};
+        }
+        #include <dithering_fragment>`
+      );
+  };
+  m.needsUpdate = true;
+}
+
+function enhanceRenderMaterial(m, base) {
+  const name = (m.name || '').toLowerCase();
+  if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
+    m.clearcoat = 1.0;
+    m.clearcoatRoughness = 0.06;
+    m.roughness = Math.min(m.roughness ?? 0.3, 0.26);
+    m.metalness = 0.65;
+    m.envMapIntensity = 1.55;
+    if (m.color) m.color.lerp(base, 0.7);
+  } else if (/chrome|mirror|metal|rim|wheel/.test(name)) {
+    m.metalness = 1.0;
+    m.roughness = Math.min(m.roughness ?? 0.18, 0.2);
+    m.envMapIntensity = 1.2;
+    if ('transmission' in m) { m.transmission = 0; m.transparent = false; }
+  } else if (/glass|window|windscreen|windshield|tint/.test(name)) {
+    if ('transmission' in m) m.transmission = 0;
+    m.metalness = 0;
+    m.roughness = 0.06;
+    m.color = new THREE.Color(0x0a0d12);
+    m.envMapIntensity = 1.3;
+    m.transparent = true;
+    m.opacity = 0.55;
+  } else if (/rubber|tyre|tire/.test(name)) {
+    m.metalness = 0;
+    m.roughness = Math.max(m.roughness ?? 0.7, 0.85);
+  }
+}
+
+export default function BuildCar({ phase, paintBase = '#1b2330', accent = '#88ccff' }) {
+  const { scene } = useGLTF('/model/porsche-gt3rs-wheels.glb', true);
+  const reduceMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // shared sweep uniforms (one object → both clones stay in lock-step)
+  const uniforms = useMemo(
+    () => ({
+      uBuild: { value: 0 },
+      uAccent: { value: new THREE.Color(accent) },
+      uZMin: { value: Z_MIN },
+      uZMax: { value: Z_MAX },
+    }),
+    [accent]
   );
 
-  useEffect(() => {
+  // ---- paint clone: lit studio materials + paint-on sweep ------------------
+  const lightMats = useRef([]); // head/tail light mats to flare on "alive"
+  const wheels = useRef([]);
+  const paintCar = useMemo(() => {
+    const car = scene.clone(true);
     const base = new THREE.Color(paintBase);
+    const rims = [], tyres = [], brakes = [];
+    lightMats.current = [];
+
     car.traverse((n) => {
+      if (n.name) {
+        if (RIM_RE.test(n.name)) rims.push(n);
+        else if (TYRE_RE.test(n.name)) tyres.push(n);
+        else if (BRAKE_RE.test(n.name)) brakes.push(n);
+      }
       if (!n.isMesh || !n.material) return;
       n.castShadow = true;
       n.receiveShadow = false;
-      const mats = Array.isArray(n.material) ? n.material : [n.material];
-      // Stash the (enhanced) render material so we can flip back to it.
-      for (const m of mats) {
+      // CLONE every material — scene.clone(true) shares material instances with
+      // the cached GLB (and with Car.jsx). Mutating shared mats + chaining
+      // onBeforeCompile across mounts binds uBuild to a stale uniforms object,
+      // so the paint sweep sometimes never fills (no colour at the end). Owning
+      // our own material copies makes the reveal deterministic.
+      const prep = (src) => {
+        const m = src.clone();
+        enhanceRenderMaterial(m, base);
         const name = (m.name || '').toLowerCase();
-        if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
-          m.clearcoat = 1.0;
-          m.clearcoatRoughness = 0.06;
-          m.roughness = Math.min(m.roughness ?? 0.3, 0.28);
-          m.metalness = 0.6;
-          m.envMapIntensity = 1.35;
-          if (m.color) m.color.lerp(base, 0.5);
-        } else if (/chrome|mirror|metal|rim|wheel/.test(name)) {
-          m.metalness = 1.0;
-          m.roughness = Math.min(m.roughness ?? 0.18, 0.2);
-          m.envMapIntensity = 1.25;
-          if ('transmission' in m) { m.transmission = 0; m.transparent = false; }
-        } else if (/glass|window|windscreen|windshield|tint/.test(name)) {
-          if ('transmission' in m) m.transmission = 0;
-          m.metalness = 0;
-          m.roughness = 0.06;
-          m.color = new THREE.Color(0x0a0d12);
-          m.envMapIntensity = 1.3;
-          m.transparent = true;
-          m.opacity = 0.55;
-        } else if (/rubber|tyre|tire/.test(name)) {
-          m.metalness = 0;
-          m.roughness = Math.max(m.roughness ?? 0.7, 0.85);
-        }
         if (/headlight|head_light|drl|led/.test(name)) {
           m.emissive = new THREE.Color(0xfff1dc);
-          m.emissiveIntensity = 1.1;
+          m.emissiveIntensity = 0.15;
+          m.userData.baseEmissive = 1.4;
+          lightMats.current.push(m);
         } else if (/taillight|tail|backlight|brake(?!disc)/.test(name) || /(^|_)red(\.|$|_)/.test(name)) {
           m.emissive = new THREE.Color(0xff1414);
-          m.emissiveIntensity = 1.2;
+          m.emissiveIntensity = 0.12;
+          m.userData.baseEmissive = 1.5;
+          lightMats.current.push(m);
         }
-        m.needsUpdate = true;
-      }
-      n.userData.renderMat = n.material; // original (now enhanced) material
+        injectSweep(m, uniforms, 'paint');
+        return m;
+      };
+      n.material = Array.isArray(n.material) ? n.material.map(prep) : prep(n.material);
     });
 
-    // Normalize: centre on origin, drop onto the floor (y=0), scale to ~4.2 long.
-    const box = new THREE.Box3().setFromObject(car);
-    const size = box.getSize(new THREE.Vector3());
-    const s = 4.2 / Math.max(size.x, size.z);
-    car.scale.setScalar(s);
-    const box2 = new THREE.Box3().setFromObject(car);
-    const c2 = box2.getCenter(new THREE.Vector3());
-    car.position.x -= c2.x;
-    car.position.z -= c2.z;
-    car.position.y -= box2.min.y;
-  }, [car, paintBase]);
+    // cluster each corner's rim+tyre+brake into a hub-pivoted group (see Car.jsx)
+    const onlyOutermost = (list) => {
+      const set = new Set(list);
+      return list.filter((n) => {
+        let p = n.parent;
+        while (p) { if (set.has(p)) return false; p = p.parent; }
+        return true;
+      });
+    };
+    car.updateWorldMatrix(true, true);
+    const cornerKey = (n) => {
+      const p = n.getWorldPosition(new THREE.Vector3());
+      return `${p.x >= 0 ? 'R' : 'L'}${p.z >= 0 ? 'F' : 'B'}`;
+    };
+    const corners = {};
+    const bucket = (list, slot) => {
+      for (const n of list) (corners[cornerKey(n)] ||= {})[slot] = n;
+    };
+    bucket(onlyOutermost(rims), 'rim');
+    bucket(onlyOutermost(tyres), 'tyre');
+    bucket(onlyOutermost(brakes), 'brake');
 
-  useFrame(() => {
-    const want = phase.current.building ? 'wire' : 'render';
-    if (want === applied.current) return;
-    applied.current = want;
+    const pivots = [];
+    for (const k of Object.keys(corners)) {
+      const { rim, tyre, brake } = corners[k];
+      const parts = [rim, tyre, brake].filter(Boolean);
+      if (!parts.length) continue;
+      const hubSrc = tyre || rim || parts[0];
+      const hubWorld = new THREE.Box3().setFromObject(hubSrc).getCenter(new THREE.Vector3());
+      const pivot = new THREE.Group();
+      pivot.name = `BUILD_WHEEL_${k}`;
+      car.add(pivot);
+      car.updateWorldMatrix(true, true);
+      pivot.position.copy(car.worldToLocal(hubWorld.clone()));
+      pivot.updateWorldMatrix(true, true);
+      for (const part of parts) pivot.attach(part);
+      pivots.push(pivot);
+    }
+    wheels.current = pivots;
+    return car;
+  }, [scene, paintBase, uniforms]);
+
+  // ---- wire clone: blue viewport wireframe, shows ahead of the sweep -------
+  const wireCar = useMemo(() => {
+    const car = scene.clone(true);
+    const wireMat = new THREE.MeshBasicMaterial({
+      color: 0x88ccff,
+      wireframe: true,
+      toneMapped: false,
+      transparent: true,
+      opacity: 0.9,
+      depthWrite: false,
+    });
+    injectSweep(wireMat, uniforms, 'wire');
     car.traverse((n) => {
-      if (!n.isMesh) return;
-      n.material = want === 'wire' ? wireMat : n.userData.renderMat;
+      if (n.isMesh) { n.material = wireMat; n.castShadow = false; }
     });
+    return car;
+  }, [scene, uniforms]);
+
+  // ---- normalize both clones identically (centre, drop to floor, scale) ----
+  useEffect(() => {
+    for (const car of [paintCar, wireCar]) {
+      car.scale.setScalar(1);
+      car.position.set(0, 0, 0);
+      const box = new THREE.Box3().setFromObject(car);
+      const size = box.getSize(new THREE.Vector3());
+      const s = 4.2 / Math.max(size.x, size.z);
+      car.scale.setScalar(s);
+      const box2 = new THREE.Box3().setFromObject(car);
+      const c2 = box2.getCenter(new THREE.Vector3());
+      car.position.x -= c2.x;
+      car.position.z -= c2.z;
+      car.position.y -= box2.min.y;
+    }
+  }, [paintCar, wireCar]);
+
+  // ---- drive the sweep + the "alive" payoff from scroll reveal ------------
+  useFrame((_, delta) => {
+    const reveal = phase.current.reveal ?? 0;
+    // paint coats on across the middle of the scroll and is FULLY on by ~0.72,
+    // then holds through the tail — so the end always shows colour even if the
+    // damped scroll settles a hair short of 1.0 (the "sometimes no colour" bug).
+    const build = THREE.MathUtils.smoothstep(reveal, 0.34, 0.72);
+    uniforms.uBuild.value = build;
+
+    // alive: last stretch of scroll → wheels spin + lights flare
+    const alive = THREE.MathUtils.smoothstep(reveal, 0.9, 1.0);
+    const d = Math.min(delta, 0.05);
+    if (alive > 0.001 && !reduceMotion) {
+      const speed = alive * d * 11.0;
+      for (const w of wheels.current) w.rotateOnWorldAxis(WORLD_X, speed);
+    }
+    for (const m of lightMats.current) {
+      const target = 0.12 + alive * (m.userData.baseEmissive ?? 1.4);
+      m.emissiveIntensity += (target - m.emissiveIntensity) * Math.min(1, d * 6);
+    }
   });
 
-  return <primitive object={car} />;
+  return (
+    <group>
+      <primitive object={wireCar} />
+      <primitive object={paintCar} />
+    </group>
+  );
 }
 
 useGLTF.preload('/model/porsche-gt3rs-wheels.glb', true);

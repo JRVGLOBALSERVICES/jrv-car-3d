@@ -11,7 +11,7 @@ const buildMood = {
   blurb:
     'The 911 built the way it is in the studio — primitives, then wireframe, then lit and revealed. Scroll to run the make: the viewport grid and on-model measurements give way to a hard cut into the rendered hero. Real-time React Three Fiber, no video.',
   hdri: '/model/modern_buildings_night_2k.hdr',
-  paintBase: '#1b2330',
+  paintBase: '#4a5d78',
   accent: '#88ccff',
 };
 

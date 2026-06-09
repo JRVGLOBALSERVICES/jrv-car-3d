@@ -81,7 +81,7 @@ function Director({ phase, setBuilding, reduceMotion }) {
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
     const offset = reduceMotion ? 1 : scroll.offset;
-    const building = reduceMotion ? false : offset < 0.5;
+    const building = reduceMotion ? false : offset < 0.32;
 
     phase.current.building = building;
     phase.current.reveal = offset;
@@ -90,16 +90,21 @@ function Director({ phase, setBuilding, reduceMotion }) {
       setBuilding(building);
     }
 
-    // reveal eases the camera from a wide modelling view to a tight hero shot
+    // reveal eases the camera from a wide modelling view to a tight hero shot,
+    // then SETTLES on a front-3/4 hero angle for the "alive" finish (never drops
+    // to floor-level where it framed the blown-out horizon).
     const r = smooth01((offset - 0.32) / 0.68);
-    const az = -0.55 + offset * Math.PI * 1.45 + (reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.05);
-    const radius = THREE.MathUtils.lerp(6.4, 4.6, r);
-    const height = THREE.MathUtils.lerp(2.5, 1.25, r);
+    const alive = smooth01((offset - 0.9) / 0.1);
+    const sweepAz = -0.55 + offset * Math.PI * 1.15;
+    const heroAz = -0.62; // front-left 3/4 hero
+    const az = THREE.MathUtils.lerp(sweepAz, heroAz, alive) + (reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.04);
+    const radius = THREE.MathUtils.lerp(6.4, 5.0, r);
+    const height = THREE.MathUtils.lerp(2.5, 1.75, r);
 
     const want = new THREE.Vector3(Math.cos(az) * radius, height, Math.sin(az) * radius);
     const s = 1 - Math.pow(0.0016, d);
     camera.position.lerp(want, reduceMotion ? 1 : s);
-    tgt.current.lerp(new THREE.Vector3(0, 0.55, 0), s);
+    tgt.current.lerp(new THREE.Vector3(0, 0.6, 0), s);
     camera.lookAt(tgt.current);
   });
   return null;
@@ -128,17 +133,16 @@ function Studio({ visible }) {
       <mesh rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
-          resolution={1024}
-          mixBlur={0.8}
-          mixStrength={2.2}
-          blur={[360, 90]}
-          mirror={0.7}
-          color="#0a0c10"
-          metalness={0.8}
-          roughness={0.25}
-          depthScale={1.1}
-          minDepthThreshold={0.4}
-          maxDepthThreshold={1.4}
+          resolution={2048}
+          mixBlur={0}
+          mixStrength={1.6}
+          blur={[0, 0]}
+          mirror={1}
+          color="#05070a"
+          metalness={0.95}
+          roughness={0.04}
+          depthScale={0}
+          reflectorOffset={0.01}
         />
       </mesh>
     </group>
@@ -189,7 +193,7 @@ export default function BuildExperience({ mood }) {
         <ScrollControls pages={PAGES} damping={0.3}>
           <Background building={building} />
           {/* HDRI drives reflections on the reveal materials only */}
-          <Environment files={mood.hdri} environmentIntensity={0.95} background={false} />
+          <Environment files={mood.hdri} environmentIntensity={0.9} background={false} />
 
           {/* studio reveal — visible after the cut */}
           <Studio visible={!building} />
@@ -213,13 +217,14 @@ export default function BuildExperience({ mood }) {
             <RigCards />
           </group>
 
-          {/* 3-point reveal rig (only lights the render materials) */}
-          <rectAreaLight color="#dfe6ff" intensity={11} width={7} height={5} position={[-7, 6, 5.5]} />
-          <rectAreaLight color="#cdd8ff" intensity={6} width={9} height={5} position={[3, 2.2, -8]} />
-          <rectAreaLight color="#ffffff" intensity={5.5} width={6} height={6} position={[0, 7, 0.5]} />
-          <ambientLight intensity={0.12} />
+          {/* 3-point reveal rig (only lights the render materials) — dialled back
+              so the studio floor + backdrop don't blow out into a white wash. */}
+          <rectAreaLight color="#dfe6ff" intensity={6.2} width={7} height={5} position={[-7, 6, 5.5]} />
+          <rectAreaLight color="#cdd8ff" intensity={3.8} width={9} height={5} position={[3, 2.2, -8]} />
+          <rectAreaLight color="#ffffff" intensity={2.1} width={6} height={6} position={[0, 7, 0.5]} />
+          <ambientLight intensity={0.14} />
 
-          <BuildCar phase={phase} paintBase={mood.paintBase} />
+          <BuildCar phase={phase} paintBase={mood.paintBase} accent={mood.accent} />
           <Director phase={phase} setBuilding={setBuilding} reduceMotion={reduceMotion} />
 
           {/* measurement HUD — only during the build phase */}
@@ -231,7 +236,7 @@ export default function BuildExperience({ mood }) {
         </ScrollControls>
 
         <EffectComposer disableNormalPass multisampling={isMobile ? 0 : 4}>
-          <Bloom mipmapBlur intensity={building ? 0.35 : 0.5} luminanceThreshold={0.82} luminanceSmoothing={0.22} radius={0.6} />
+          <Bloom mipmapBlur intensity={building ? 0.3 : 0.28} luminanceThreshold={0.9} luminanceSmoothing={0.3} radius={0.5} />
           <ToneMapping mode={ToneMappingMode.AGX} />
         </EffectComposer>
         <AdaptiveDpr pixelated />
@@ -247,8 +252,8 @@ function BuildLabels({ building }) {
   const steps = [
     { k: 'PRIMITIVES', n: 'Block out the body' },
     { k: 'WIREFRAME', n: 'Refine the panels' },
-    { k: 'RENDER', n: 'Light it · reveal' },
-    { k: 'HERO', n: '911 GT3 RS' },
+    { k: 'PAINT', n: 'Coat the body' },
+    { k: 'DRIVE', n: '911 GT3 RS' },
   ];
   return (
     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}>
