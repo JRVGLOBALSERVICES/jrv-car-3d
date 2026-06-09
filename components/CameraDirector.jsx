@@ -37,9 +37,12 @@ export default function CameraDirector({ spinRef, reduceMotion }) {
     const offset = reduceMotion ? 0 : scroll.offset;
 
     // wheel spin: idle roll + a kick proportional to scroll velocity
+    // Near-still at rest, then the wheels really roll when you scroll the cut —
+    // angular speed tracks scroll velocity so the wheels, the streaming grid and
+    // the rushing air all read as the SAME ground speed.
     const vel = Math.abs(offset - lastOffset.current) / Math.max(d, 0.0001);
     lastOffset.current = offset;
-    if (spinRef) spinRef.current = 0.5 + Math.min(vel * 2.2, 5);
+    if (spinRef) spinRef.current = 0.2 + Math.min(vel * 2.9, 7);
 
     // interpolate between shots
     const n = SHOTS.length - 1;

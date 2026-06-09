@@ -95,7 +95,8 @@ function enhanceRenderMaterial(m, base) {
     m.roughness = Math.min(m.roughness ?? 0.3, 0.26);
     m.metalness = 0.65;
     m.envMapIntensity = 1.55;
-    if (m.color) m.color.lerp(base, 0.7);
+    // cobalt dominates so the painted car reads as a real colour, not steel-grey
+    if (m.color) m.color.lerp(base, 0.88);
   } else if (/chrome|mirror|metal|rim|wheel/.test(name)) {
     m.metalness = 1.0;
     m.roughness = Math.min(m.roughness ?? 0.18, 0.2);
@@ -182,15 +183,20 @@ export default function BuildCar({ phase, paintBase = '#1b2330', accent = '#88cc
         const m = src.clone();
         enhanceRenderMaterial(m, base);
         const name = (m.name || '').toLowerCase();
+        // Coloured lights for the "drive" payoff: crisp cool-white xenon up
+        // front, deep saturated red at the rear — both flare hard so Bloom
+        // catches them (the old warm-white / dim values barely read as "on").
         if (/headlight|head_light|drl|led/.test(name)) {
-          m.emissive = new THREE.Color(0xfff1dc);
+          m.emissive = new THREE.Color(0xbfe0ff); // xenon white-blue
           m.emissiveIntensity = 0.15;
-          m.userData.baseEmissive = 1.4;
+          m.toneMapped = false;
+          m.userData.baseEmissive = 2.4;
           lightMats.current.push(m);
         } else if (/taillight|tail|backlight|brake(?!disc)/.test(name) || /(^|_)red(\.|$|_)/.test(name)) {
-          m.emissive = new THREE.Color(0xff1414);
+          m.emissive = new THREE.Color(0xff1530); // deep brake red
           m.emissiveIntensity = 0.12;
-          m.userData.baseEmissive = 1.5;
+          m.toneMapped = false;
+          m.userData.baseEmissive = 2.6;
           lightMats.current.push(m);
         }
         injectSweep(m, uniforms, 'paint');

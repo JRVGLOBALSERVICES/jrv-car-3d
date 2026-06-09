@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
   ScrollControls,
@@ -79,11 +79,37 @@ function Director({ phase, setBuilding, reduceMotion }) {
   const { camera, size } = useThree();
   const tgt = useRef(new THREE.Vector3(0, 0.55, 0));
   const lastBuilding = useRef(true);
+  // manual "turn the car around" drag on the finished-car step. Pointer events
+  // bound to window so they fire even under drei's ScrollControls scroll overlay
+  // (OrbitControls won't compose under ScrollControls — this does).
+  const drag = useRef({ down: false, lastX: 0, az: 0, auto: 0 });
+  const canInspect = useRef(false);
+
+  useEffect(() => {
+    const px = (e) => (e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0));
+    const onDown = (e) => { drag.current.down = true; drag.current.lastX = px(e); };
+    const onUp = () => { drag.current.down = false; };
+    const onMove = (e) => {
+      if (!drag.current.down || !canInspect.current) return;
+      const x = px(e);
+      drag.current.az += (x - drag.current.lastX) * 0.006;
+      drag.current.lastX = x;
+    };
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointermove', onMove);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointermove', onMove);
+    };
+  }, []);
 
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
     const offset = reduceMotion ? 1 : scroll.offset;
     const building = reduceMotion ? false : offset < CUT;
+    canInspect.current = reduceMotion || offset >= 0.78;
 
     phase.current.building = building;
     phase.current.reveal = offset;
@@ -107,7 +133,11 @@ function Director({ phase, setBuilding, reduceMotion }) {
       const coatT = smooth01((offset - 0.46) / 0.32);
       az = heroAz + coatT * Math.PI * 2; // one full revolution synced to the coat
     } else {
-      az = heroAz; // revolution complete, hold the hero 3/4 for the payoff
+      // finished car: a slow showroom turntable the user can grab and HOLD —
+      // the auto-rotate pauses while dragging (grab-and-hold) and resumes on
+      // release, so drag left/right actually turns the car and keeps it there.
+      if (!drag.current.down && !reduceMotion) drag.current.auto += d * 0.12;
+      az = heroAz + drag.current.auto + drag.current.az;
     }
     az += reduceMotion ? 0 : Math.sin(performance.now() * 0.00015) * 0.03;
     const radius = THREE.MathUtils.lerp(6.4, 5.0, buildIn);
@@ -137,19 +167,41 @@ function Director({ phase, setBuilding, reduceMotion }) {
   return null;
 }
 
+// Radial glow texture (bright centre → transparent) for the showroom mood washes.
+function glowTexture(rgb) {
+  const s = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+  g.addColorStop(0, `rgba(${rgb},0.9)`);
+  g.addColorStop(0.4, `rgba(${rgb},0.32)`);
+  g.addColorStop(1, `rgba(${rgb},0)`);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
+  return new THREE.CanvasTexture(c);
+}
+
 function Studio({ visible, isMobile }) {
   RectAreaLightUniformsLib.init();
+  // Showroom infinity-cove: a bright top wall sweeping down into a darker
+  // polished floor — the seamless studio backdrop of a car showroom, not the
+  // black void it was before. The glossy floor + two coloured mood washes
+  // (cool teal one side, warm amber the other) give the "concept showroom" feel.
   const backdrop = useMemo(() => {
     const c = document.createElement('canvas');
     c.width = 16; c.height = 512;
     const ctx = c.getContext('2d');
     const g = ctx.createLinearGradient(0, 0, 0, 512);
-    g.addColorStop(0, '#22262d');
-    g.addColorStop(0.6, '#0b0c0f');
-    g.addColorStop(1, '#070809');
+    g.addColorStop(0, '#d9dde3');   // bright cove ceiling
+    g.addColorStop(0.5, '#6a7077'); // soft horizon
+    g.addColorStop(0.78, '#23262b');
+    g.addColorStop(1, '#15171b');   // floor base
     ctx.fillStyle = g; ctx.fillRect(0, 0, 16, 512);
     const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
   }, []);
+  const coolGlow = useMemo(() => glowTexture('40,210,200'), []);
+  const warmGlow = useMemo(() => glowTexture('255,150,70'), []);
 
   return (
     <group visible={visible}>
@@ -157,23 +209,31 @@ function Studio({ visible, isMobile }) {
         <sphereGeometry args={[40, 32, 16]} />
         <meshBasicMaterial map={backdrop} side={THREE.BackSide} depthWrite={false} toneMapped={false} />
       </mesh>
-      {/* Soft studio floor — a BLURRED reflection that fades into the backdrop,
-          not a perfect black mirror (the old 2048 mirror read as the car
-          floating over a void, and choked the GPU-less capture renderer). */}
+      {/* Coloured showroom mood washes — additive so Bloom catches them, framing
+          the car with a cool teal rake on the left and a warm amber on the right. */}
+      <mesh position={[-9, 3.2, -10]} scale={[16, 13, 1]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial map={coolGlow} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0.6} toneMapped={false} />
+      </mesh>
+      <mesh position={[9, 2.6, -10]} scale={[15, 12, 1]}>
+        <planeGeometry args={[1, 1]} />
+        <meshBasicMaterial map={warmGlow} transparent depthWrite={false} blending={THREE.AdditiveBlending} opacity={0.5} toneMapped={false} />
+      </mesh>
+      {/* Polished showroom floor — a lighter glossy reflection that grounds the
+          car on a lit platform rather than the old near-black mirror over a void. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
         <planeGeometry args={[44, 44]} />
         <MeshReflectorMaterial
           resolution={isMobile ? 256 : 1024}
           mixBlur={isMobile ? 0 : 1}
-          mixStrength={0.65}
-          // Mobile: skip the [420,160] blur kernel — it's a per-frame full-screen
-          // pass and the heaviest single cost on a phone. Low-res sharp mirror +
-          // high roughness still reads as a soft studio floor under Bloom.
-          blur={isMobile ? [0, 0] : [420, 160]}
-          mirror={0.55}
-          color="#0a0c10"
-          metalness={0.55}
-          roughness={0.72}
+          mixStrength={0.8}
+          // Mobile: skip the blur kernel (per-frame full-screen pass, the heaviest
+          // single phone cost). Sharp low-res mirror + roughness still reads soft.
+          blur={isMobile ? [0, 0] : [300, 120]}
+          mirror={0.62}
+          color="#1b1f25"
+          metalness={0.6}
+          roughness={0.62}
           depthScale={1.1}
           minDepthThreshold={0.4}
           maxDepthThreshold={1.25}
@@ -292,7 +352,7 @@ function BuildLabels() {
     { k: 'PANELS', n: 'Forged in chrome', c: '#c6ccd4' },
     { k: 'COAT', n: 'Lay the paint', c: '#9B6CFF' },
     { k: '360° COAT', n: 'Wrap every panel', c: '#9B6CFF' },
-    { k: 'DRIVE', n: '911 GT3 RS', c: '#9B6CFF' },
+    { k: 'SHOWROOM', n: '911 GT3 RS', c: '#88ccff', hint: 'drag to turn the car' },
   ];
   return (
     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}>
@@ -332,6 +392,21 @@ function BuildLabels() {
             >
               {s.n}
             </div>
+            {s.hint && (
+              <div
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  letterSpacing: '0.18em',
+                  textTransform: 'uppercase',
+                  color: 'var(--color-ink)',
+                  opacity: 0.55,
+                  marginTop: '14px',
+                }}
+              >
+                ⟷ {s.hint}
+              </div>
+            )}
           </div>
         </section>
       ))}

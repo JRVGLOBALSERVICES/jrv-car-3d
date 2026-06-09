@@ -32,7 +32,10 @@ function Effects({ mood, isMobile }) {
 }
 
 export default function Experience({ mood, mode = 'scroll' }) {
-  const spinRef = useRef(mode === 'orbit' ? 1 : 0.5);
+  // Orbit pages are PARKED showrooms (turntable on the camera, not the car), so
+  // the wheels must be still — a parked car with forever-spinning wheels was the
+  // biggest "fake" tell. Scroll reel idles near-still and rolls with scroll speed.
+  const spinRef = useRef(mode === 'orbit' ? 0 : 0.2);
   const reduceMotion =
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches;

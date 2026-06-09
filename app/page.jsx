@@ -11,6 +11,8 @@ const mood = {
   signature: 'grid', // laser-grid floor (the home reel signature)
   noWind: false, // rushing air is part of the speed read here
   accent: '#00FF88', // green laser-grid
+  // Guards Red body — the speed-reel hero colour, hot against the green grid.
+  paintBase: '#C8102E',
   windColor: '#cfe2ff', // cool air, kept off the green grid hue
   bloom: 0.5,
   // home's own glass floor — sharper + darker than the city's rain-wet mirror

@@ -106,7 +106,9 @@ export default function Car({ mood, spinRef }) {
             m.iridescenceIOR = 1.4;
             m.iridescenceThicknessRange = [180, 820];
           }
-          if (m.color) m.color.lerp(paintBase, 0.4);
+          // let the page's chosen body colour dominate (was 0.4 → cars read
+          // near-black); keep a touch of the GLB's own shading variation.
+          if (m.color) m.color.lerp(paintBase, 0.85);
           m.sheen = 1.0;
           m.sheenRoughness = 0.4;
           m.sheenColor = new THREE.Color(0x2a5cff);

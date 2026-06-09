@@ -12,7 +12,10 @@ const buildMood = {
   blurb:
     'The 911 assembled the way it is in the studio — primitive block-out, then panels forged in bare silver chrome, then the paint coats over the metal as the car turns a full 360 so you watch it wrap every panel, landing as a finished hero. Scroll to run the make. Real-time React Three Fiber, no video.',
   hdri: '/model/modern_buildings_night_2k.hdr',
-  paintBase: '#4a5d78',
+  // Cobalt hero paint — a real saturated colour for the coat payoff, so the
+  // finished car reads as PAINTED, not as the bare steel-grey it looked before
+  // (the old #4a5d78 was too close to chrome). The coat seam stays cool blue.
+  paintBase: '#1B4DD8',
   accent: '#88ccff',
 };
 
