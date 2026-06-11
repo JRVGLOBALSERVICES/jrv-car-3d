@@ -5,15 +5,15 @@ import { MOODS } from '@/lib/moods';
 export const metadata = {
   title: 'JRV · 911 GT3 RS — Backstreet',
   description:
-    'A real-time React Three Fiber Porsche 911 GT3 RS on warm backstreet light. AgX tone mapping, Reflector wet floor, copper-to-violet thin-film paint. Drag to orbit.',
-  openGraph: { title: 'JRV · 911 GT3 RS — Backstreet', description: 'Warm sodium light, copper paint — live WebGL. Drag to orbit.' },
+    'A real-time React Three Fiber Porsche 911 GT3 RS parked under a sodium streetlight on a real backstreet. Scroll walks a full 360° circle around the car at eye level — nose, flank, wing, wheel. AgX tone mapping.',
+  openGraph: { title: 'JRV · 911 GT3 RS — Backstreet', description: 'A 360° eye-level walk-around under sodium light, live WebGL. Scroll to circle the car.' },
 };
 
 export default function NightStreet() {
   return (
     <main>
-      <SceneMount mood={MOODS.street} mode="orbit" />
-      <Chrome mood={MOODS.street} current="street" hint="drag to orbit · scroll to zoom" />
+      <SceneMount mood={MOODS.street} mode="scroll" />
+      <Chrome mood={MOODS.street} current="street" cue hint="scroll to walk around the car" />
     </main>
   );
 }

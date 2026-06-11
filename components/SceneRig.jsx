@@ -7,6 +7,7 @@ import { RectAreaLightUniformsLib } from 'three/examples/jsm/lights/RectAreaLigh
 import LaserGrid from './LaserGrid';
 import CityLights from './CityLights';
 import DustField from './DustField';
+import CityWorld from './CityWorld';
 
 function gradientTexture(top, bot) {
   const c = document.createElement('canvas');
@@ -66,10 +67,14 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
       {/* HDRI drives reflections + lighting ONLY — never the visible background */}
       <Environment files={mood.hdri} environmentIntensity={mood.envIntensity} background={false} />
 
+      {/* Night air — depth fog so the building corridor recedes instead of
+          popping in. Density per mood; additive scene elements opt out (fog:false). */}
+      {mood.fog && <fog attach="fog" args={[mood.fog.color, mood.fog.near, mood.fog.far]} />}
+
       {/* Dark cyclorama backdrop (the controlled gradient, not the blurry photo) */}
       <mesh scale={[1, 1, 1]} rotation={[0, 0, 0]}>
         <sphereGeometry args={[40, 32, 16]} />
-        <meshBasicMaterial map={backdrop} side={THREE.BackSide} depthWrite={false} toneMapped={false} />
+        <meshBasicMaterial map={backdrop} side={THREE.BackSide} depthWrite={false} toneMapped={false} fog={false} />
       </mesh>
 
       {/* Accent wash rising behind the car (reel's coloured backdrop glow) — additive so Bloom lights it.
@@ -85,7 +90,9 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
             // softer wash — an additive glow that Bloom amplifies, so 0.9 read as a
             // bright haze behind the car. Lower (and lower again on mobile) so it
             // frames the car without becoming one of the "too bright" rays.
-            opacity={isMobile ? 0.46 : 0.6}
+            // when the 3D city world is present it carries the backdrop —
+            // the wash steps back to a faint halo instead of a sky-wide smear
+            opacity={(isMobile ? 0.46 : 0.6) * (mood.world ? 0.5 : 1)}
             toneMapped={false}
           />
         </mesh>
@@ -102,9 +109,29 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
       )}
       <ambientLight intensity={0.09} />
 
+      {/* Real cast shadow — RectAreaLights can't cast, so one shadow-casting
+          spotlight rides above the key side. Tight cone + bias so the car
+          throws a hard readable shadow onto the mirror floor (desktop only —
+          shadow maps are off on mobile via Canvas `shadows`). */}
+      <spotLight
+        castShadow
+        color={mood.key_.color}
+        position={[mood.key_.pos[0] * 0.8, 8.5, mood.key_.pos[2] * 0.8]}
+        angle={0.42}
+        penumbra={0.75}
+        intensity={mood.shadowSpot ?? 95}
+        distance={36}
+        decay={2}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
+        shadow-bias={-0.00018}
+        shadow-camera-near={2}
+        shadow-camera-far={26}
+      />
+
       {/* Wet-asphalt mirror floor — sharper mirror to match the reel's glass floor.
           Half-res reflection target on mobile to avoid GPU-memory white-screens. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} receiveShadow>
         <planeGeometry args={[60, 60]} />
         <MeshReflectorMaterial
           resolution={isMobile ? 512 : 1536}
@@ -136,6 +163,20 @@ export default function SceneRig({ mood, isMobile = false, spinRef }) {
       )}
       {mood.signature === 'skyline' && <CityLights isMobile={isMobile} />}
       {mood.signature === 'sodium' && <DustField isMobile={isMobile} color={mood.windColor} />}
+
+      {/* 3D night-city game world — instanced lit-window buildings, kerbside
+          streetlights with volumetric cones, NFS traffic light-trails. `drive`
+          streams it past the car speed-synced to the reel; `parked` rings the
+          orbit pages with a static twinkling skyline. */}
+      {mood.world && (
+        <CityWorld
+          isMobile={isMobile}
+          speedRef={spinRef}
+          mode={mood.world}
+          accent={mood.accent}
+          lampColor={mood.lampColor ?? '#ffb15c'}
+        />
+      )}
 
       {/* Soft contact shadow grounding the car on the reflection */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.002, 0.2]} scale={[3.4, 4.6, 1]}>

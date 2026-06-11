@@ -1,0 +1,15 @@
+[
+  {
+    "date": "2026-06-10",
+    "macrostructure": "3D scene redesign (scene layer, not page shape)",
+    "theme": "atmospheric \u00b7 night-city game world",
+    "enrichment": "CityWorld.jsx \u2014 instanced buildings + volumetric lamp cones + NFS light-trails + fog + cast shadows + flake carpaint",
+    "brief": "jrv-car-3d v3 \u2014 realistic 3D gaming world upgrade"
+  },
+  {
+    "date": "2026-06-11",
+    "verb": "audit",
+    "scope": "pre-commit (9 staged files, v3 night-city world)",
+    "result": "pass \u2014 copy concrete, palette tokenised, render verified via local prod + agent-browser still"
+  }
+]

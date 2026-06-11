@@ -8,11 +8,21 @@ import { MOODS } from '@/lib/moods';
 // city HDRI. Green grid, sharp glass mirror, wind on.
 const mood = {
   ...MOODS.city,
+  // ...MOODS.city drags in the city page's drone-descent shot list + glide
+  // style — home keeps its OWN language: the default hard-cut six-shot reel.
+  shots: undefined,
+  camStyle: 'cut',
   signature: 'grid', // laser-grid floor (the home reel signature)
   noWind: false, // rushing air is part of the speed read here
+  // FULL night-city game world streaming past — instanced lit-window
+  // buildings, kerbside streetlights with volumetric cones, NFS traffic
+  // light-trails — all speed-synced to the same spinRef as the grid + wheels.
+  world: 'drive',
+  lampColor: '#ffb15c', // sodium kerb lamps against the green grid
+  fog: { color: '#04070f', near: 18, far: 72 }, // city recedes into night air
   accent: '#00FF88', // green laser-grid
-  // Guards Red body — the speed-reel hero colour, hot against the green grid.
-  paintBase: '#C8102E',
+  // Candy cherry body — flake clearcoat carpaint, hot against the green grid.
+  paintBase: '#D80A2E',
   windColor: '#cfe2ff', // cool air, kept off the green grid hue
   bloom: 0.5,
   // home's own glass floor — sharper + darker than the city's rain-wet mirror
@@ -21,7 +31,7 @@ const mood = {
   floorRoughness: 0.32,
   title: ['Ride the', 'cut'],
   blurb:
-    'A 911 GT3 RS in a dark studio, lit by a night-city HDRI. Scroll and the camera flies the cut — front stance, rear wing, wheel detail, nose line, hero orbit — while the grid streams under the wheels and the air tears past. Real-time React Three Fiber, no video.',
+    'A 911 GT3 RS tearing through a night city — lit-window towers and streetlights rush past, traffic streaks by in light-trails, and the camera flies a six-shot cut: front stance, rear wing, wheel detail, nose line, street chase, hero orbit. Real-time React Three Fiber, no video.',
 };
 
 export default function Home() {

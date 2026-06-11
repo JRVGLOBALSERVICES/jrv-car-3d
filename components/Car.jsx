@@ -7,13 +7,41 @@ import * as THREE from 'three';
 
 const WORLD_X = new THREE.Vector3(1, 0, 0); // car points along Z → axle is world X
 
+// Procedural metallic-flake normal map — tiny random normal perturbations that
+// the clearcoat reads as paint flake sparkle under the rig + HDRI. Shared
+// (module-level lazy singleton) so every paint material reuses one texture.
+let _flakeTex = null;
+function flakeTexture() {
+  if (_flakeTex || typeof document === 'undefined') return _flakeTex;
+  const s = 128;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(s, s);
+  for (let i = 0; i < img.data.length; i += 4) {
+    // mostly-flat normals (128,128,255) with sparse strong flakes
+    const flake = Math.random() < 0.18;
+    const k = flake ? 52 : 7;
+    img.data[i] = 128 + (Math.random() * 2 - 1) * k;
+    img.data[i + 1] = 128 + (Math.random() * 2 - 1) * k;
+    img.data[i + 2] = 255;
+    img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  _flakeTex = new THREE.CanvasTexture(c);
+  _flakeTex.wrapS = _flakeTex.wrapT = THREE.RepeatWrapping;
+  _flakeTex.repeat.set(22, 22);
+  _flakeTex.anisotropy = 4;
+  return _flakeTex;
+}
+
 // Bold thin-film / oil-slick paint (reel DZUxxxXpBrH). MeshPhysicalMaterial's
 // built-in `iridescence` is too subtle for this look (see memory), so we inject
 // the reel's actual node graph by hand: Layer-Weight *Facing* → wavelength ramp.
 // Facing the camera reads warm (red/orange), grazing edges go cool (blue/violet),
 // with a fine flake sparkle. The spectral colour both tints the lit surface and
 // adds a fresnel-weighted emissive so Bloom lights the grazing edges.
-function applyIridescentPaint(m) {
+function applyIridescentPaint(m, shaderSink) {
   m.clearcoat = 0.7;
   m.clearcoatRoughness = 0.1;
   m.roughness = 0.22; // reel's Glossy roughness
@@ -26,10 +54,14 @@ function applyIridescentPaint(m) {
     m.iridescenceThicknessRange = [120, 560];
   }
   m.onBeforeCompile = (shader) => {
+    // scroll-driven spectrum scrub: /iridescent walks this uniform with the
+    // scroll offset so the whole rainbow physically slides across the body
+    shader.uniforms.uHueShift = { value: 0 };
     shader.fragmentShader = shader.fragmentShader
       .replace(
         'void main() {',
         /* glsl */ `
+        uniform float uHueShift;
         vec3 jrvHue(float h){
           h = fract(h);
           return clamp(abs(mod(h*6.0+vec3(0.0,4.0,2.0),6.0)-3.0)-1.0, 0.0, 1.0);
@@ -47,7 +79,7 @@ function applyIridescentPaint(m) {
           // facing → warm (orange/red), grazing → cool (blue/violet). Smooth,
           // view-stable spectrum (no screen-space hash → no shimmer/grain) so a
           // 3/4 view shows the whole spectrum walk cleanly across the panels.
-          float h = (1.0 - ndv) * 0.92 + 0.04;
+          float h = (1.0 - ndv) * 0.92 + 0.04 + uHueShift;
           vec3 iri = jrvHue(h);
           // tint the lit surface with the spectral colour (dominant over the base)
           diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.12 + iri * 0.9, 0.94);
@@ -56,6 +88,7 @@ function applyIridescentPaint(m) {
           totalEmissiveRadiance += iri * (fres * 1.1 + 0.12);
         }`
       );
+    if (shaderSink) shaderSink.push(shader);
   };
   m.needsUpdate = true;
 }
@@ -70,9 +103,10 @@ const RIM_RE = /chrome_wheels_20x9/i;
 const TYRE_RE = /Object_4\.\d/i;
 const BRAKE_RE = /brakedisc_FR/i;
 
-export default function Car({ mood, spinRef }) {
+export default function Car({ mood, spinRef, progressRef }) {
   const root = useRef();
   const wheels = useRef([]);
+  const iridShaders = useRef([]);
   const { scene } = useGLTF('/model/porsche-gt3rs-wheels.glb', true);
 
   // Clone so the two mood pages don't fight over one cached graph.
@@ -80,6 +114,7 @@ export default function Car({ mood, spinRef }) {
 
   useEffect(() => {
     const rims = [], tyres = [], brakes = [];
+    iridShaders.current = [];
     const paintBase = new THREE.Color(mood.paintBase);
 
     car.traverse((n) => {
@@ -90,29 +125,39 @@ export default function Car({ mood, spinRef }) {
       }
       if (!n.isMesh || !n.material) return;
       n.castShadow = true;
-      n.receiveShadow = false;
+      n.receiveShadow = true; // self-shadowing from the spot key adds panel depth
       const mats = Array.isArray(n.material) ? n.material : [n.material];
       for (const m of mats) {
         const name = (m.name || '').toLowerCase();
         if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name) && mood.paint === 'iridescent') {
-          applyIridescentPaint(m);
+          applyIridescentPaint(m, iridShaders.current);
         } else if (/carpaint|paint|body/.test(name) && !/glass|chrome|trim/.test(name)) {
+          // Showroom flake carpaint: glass-smooth clearcoat over a metallic
+          // base, with a procedural flake normal map so highlights sparkle as
+          // the camera moves (the real candy-paint read, not a flat colour).
           m.clearcoat = 1.0;
-          m.clearcoatRoughness = 0.06;
-          m.roughness = Math.min(m.roughness ?? 0.3, 0.3);
-          m.metalness = 0.55;
-          m.envMapIntensity = 1.45;
+          m.clearcoatRoughness = 0.03;
+          m.roughness = Math.min(m.roughness ?? 0.3, 0.24);
+          m.metalness = 0.62;
+          m.envMapIntensity = mood.paintEnv ?? 1.55;
+          if (!m.normalMap) {
+            const fl = flakeTexture();
+            if (fl) {
+              m.normalMap = fl;
+              m.normalScale = new THREE.Vector2(0.32, 0.32);
+            }
+          }
           if ('iridescence' in m) {
-            m.iridescence = 1.0;
-            m.iridescenceIOR = 1.4;
-            m.iridescenceThicknessRange = [180, 820];
+            m.iridescence = 0.35; // a whisper of pearl shift, not the oil-slick page
+            m.iridescenceIOR = 1.35;
+            m.iridescenceThicknessRange = [200, 700];
           }
           // let the page's chosen body colour dominate (was 0.4 → cars read
           // near-black); keep a touch of the GLB's own shading variation.
-          if (m.color) m.color.lerp(paintBase, 0.85);
-          m.sheen = 1.0;
-          m.sheenRoughness = 0.4;
-          m.sheenColor = new THREE.Color(0x2a5cff);
+          if (m.color) m.color.lerp(paintBase, 0.9);
+          m.sheen = 0.6;
+          m.sheenRoughness = 0.5;
+          m.sheenColor = new THREE.Color(mood.paintBase).multiplyScalar(0.5);
         } else if (/chrome|mirror|metal|rim|wheel/.test(name)) {
           m.metalness = 1.0;
           m.roughness = Math.min(m.roughness ?? 0.18, 0.2);
@@ -132,10 +177,10 @@ export default function Car({ mood, spinRef }) {
         }
         if (/headlight|head_light|drl|led/.test(name)) {
           m.emissive = new THREE.Color(0xfff1dc);
-          m.emissiveIntensity = 1.2;
+          m.emissiveIntensity = 2.1; // hot enough to cross the bloom threshold
         } else if (/taillight|tail|backlight|brake(?!disc)/.test(name) || /(^|_)red(\.|$|_)/.test(name)) {
           m.emissive = new THREE.Color(0xff1414);
-          m.emissiveIntensity = 1.3;
+          m.emissiveIntensity = 2.4; // tails glow like the NFS reference
         }
         m.needsUpdate = true;
       }
@@ -214,6 +259,12 @@ export default function Car({ mood, spinRef }) {
   }, [car, mood]);
 
   useFrame((_, delta) => {
+    // spectrum scrub: scroll progress slides the thin-film hue across the body
+    // (only the iridescent page populates iridShaders)
+    if (progressRef && iridShaders.current.length) {
+      const shift = progressRef.current * 0.85;
+      for (const s of iridShaders.current) s.uniforms.uHueShift.value = shift;
+    }
     const base = spinRef?.current ?? 1;
     // clamp delta so a tab-switch stutter doesn't snap the wheels
     const d = Math.min(delta, 0.05);

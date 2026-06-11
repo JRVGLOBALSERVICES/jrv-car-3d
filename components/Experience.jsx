@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import Car from './Car';
 import SceneRig from './SceneRig';
 import WindStreaks from './WindStreaks';
-import CameraDirector, { SHOTS } from './CameraDirector';
+import CameraDirector, { SHOTS, shotPos } from './CameraDirector';
 import { ColorGrade } from './Grade';
 
 function Effects({ mood, isMobile }) {
@@ -43,10 +43,19 @@ function Effects({ mood, isMobile }) {
 }
 
 export default function Experience({ mood, mode = 'scroll' }) {
-  // Orbit pages are PARKED showrooms (turntable on the camera, not the car), so
-  // the wheels must be still — a parked car with forever-spinning wheels was the
-  // biggest "fake" tell. Scroll reel idles near-still and rolls with scroll speed.
-  const spinRef = useRef(mode === 'orbit' ? 0 : 0.2);
+  // Per-page camera language: each route brings its OWN shot list + style
+  // (cut / glide / arc) so the five pages scroll differently — falls back to
+  // the home reel's hard-cut SHOTS for moods that predate `shots`.
+  const shots = mood.shots ?? SHOTS;
+  const camStyle = mood.camStyle ?? 'cut';
+  const isDrive = mood.world === 'drive';
+  // Scroll progress shared with the car so /iridescent can scrub its thin-film
+  // hue with the scroll (the paint itself is the scroll animation there).
+  const progressRef = useRef(0);
+  // Parked pages (walk-around / descent / scrub) keep the wheels still — a
+  // parked car with forever-spinning wheels was the biggest "fake" tell.
+  // The drive reel idles near-still and rolls with scroll speed.
+  const spinRef = useRef(mode === 'orbit' || !isDrive ? 0 : 0.2);
   const reduceMotion =
     typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isMobile = typeof window !== 'undefined' && window.matchMedia('(max-width: 820px)').matches;
@@ -67,13 +76,13 @@ export default function Experience({ mood, mode = 'scroll' }) {
         // Orbit pages frame statically from the mood's own camera — widen fov +
         // pull back on mobile so the portrait viewport doesn't balloon the car
         // (scroll mode does this live in CameraDirector).
-        fov: mode === 'orbit' ? (isMobile ? orbit.fov + 6 : orbit.fov) : SHOTS[0].fov,
+        fov: mode === 'orbit' ? (isMobile ? orbit.fov + 6 : orbit.fov) : shots[0].fov,
         near: 0.05,
         far: 500,
         position:
           mode === 'orbit'
             ? (isMobile ? [orbit.start[0] + 1.2, orbit.start[1], orbit.start[2] + 1.4] : orbit.start)
-            : SHOTS[0].pos,
+            : shotPos(shots[0]),
       }}
       onCreated={({ gl }) => {
         // A lost context (phone GPU evicts WebGL under memory pressure / tab
@@ -88,13 +97,20 @@ export default function Experience({ mood, mode = 'scroll' }) {
     >
       <Suspense fallback={null}>
         {mode === 'scroll' ? (
-          <ScrollControls pages={SHOTS.length} damping={0.3}>
+          <ScrollControls pages={shots.length} damping={0.3}>
             <SceneRig mood={mood} isMobile={isMobile} spinRef={spinRef} />
-            <Car mood={mood} spinRef={spinRef} />
+            <Car mood={mood} spinRef={spinRef} progressRef={progressRef} />
             <WindStreaks spinRef={spinRef} mood={mood} reduceMotion={reduceMotion} isMobile={isMobile} />
-            <CameraDirector spinRef={spinRef} reduceMotion={reduceMotion} />
+            <CameraDirector
+              spinRef={spinRef}
+              reduceMotion={reduceMotion}
+              shots={shots}
+              style={camStyle}
+              drive={isDrive}
+              progressRef={progressRef}
+            />
             <Scroll html style={{ width: '100%' }}>
-              <SectionLabels mood={mood} />
+              <SectionLabels mood={mood} shots={shots} />
             </Scroll>
           </ScrollControls>
         ) : (
@@ -123,10 +139,10 @@ export default function Experience({ mood, mode = 'scroll' }) {
 }
 
 // Section markers scroll with the camera shots — the visible "scene changes".
-function SectionLabels({ mood }) {
+function SectionLabels({ mood, shots = SHOTS }) {
   return (
     <div style={{ position: 'absolute', top: 0, left: 0, width: '100%' }}>
-      {SHOTS.map((s) => (
+      {shots.map((s) => (
         <section
           key={s.id}
           style={{
